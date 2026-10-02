@@ -1,0 +1,5 @@
+__pycache__/
+.pytest_cache/
+# Downloaded data (re-create with: python -m backtest.download_data)
+data/
+*.csv
