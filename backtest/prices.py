@@ -23,35 +23,45 @@ def yahoo_symbol(ticker: str) -> str:
 
 def download_prices(tickers, start, end=None, prices_dir: Path = PRICES_DIR, batch_size: int = 50) -> list[str]:
     """Download split/dividend-adjusted daily OHLCV from Yahoo. Returns tickers with no data."""
-    import yfinance as yf
-
     prices_dir.mkdir(parents=True, exist_ok=True)
     tickers = list(tickers)
     missing = []
     for i in range(0, len(tickers), batch_size):
-        batch = tickers[i : i + batch_size]
-        symbols = {yahoo_symbol(t): t for t in batch}
-        data = yf.download(
-            list(symbols),
-            start=start,
-            end=end,
-            auto_adjust=True,
-            group_by="ticker",
-            progress=False,
-            threads=True,
-        )
-        for symbol, ticker in symbols.items():
-            try:
-                frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
-            except KeyError:
-                frame = pd.DataFrame()
-            frame = frame.dropna(subset=["Close"]) if "Close" in frame else pd.DataFrame()
-            if frame.empty:
-                missing.append(ticker)
-                continue
-            frame.index.name = "Date"
-            frame[["Open", "High", "Low", "Close", "Volume"]].to_csv(prices_dir / f"{ticker}.csv")
+        missing += _download_batch(tickers[i : i + batch_size], start, end, prices_dir, threads=True)
         print(f"  downloaded {min(i + batch_size, len(tickers))}/{len(tickers)}")
+    if missing:
+        # Parallel downloads sometimes fail on yfinance's cache ("database is
+        # locked"); retry the failures one at a time.
+        print(f"  retrying {len(missing)} failed tickers one at a time")
+        missing = _download_batch(missing, start, end, prices_dir, threads=False)
+    return missing
+
+
+def _download_batch(batch, start, end, prices_dir: Path, threads: bool) -> list[str]:
+    import yfinance as yf
+
+    symbols = {yahoo_symbol(t): t for t in batch}
+    data = yf.download(
+        list(symbols),
+        start=start,
+        end=end,
+        auto_adjust=True,
+        group_by="ticker",
+        progress=False,
+        threads=threads,
+    )
+    missing = []
+    for symbol, ticker in symbols.items():
+        try:
+            frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
+        except KeyError:
+            frame = pd.DataFrame()
+        frame = frame.dropna(subset=["Close"]) if "Close" in frame else pd.DataFrame()
+        if frame.empty:
+            missing.append(ticker)
+            continue
+        frame.index.name = "Date"
+        frame[["Open", "High", "Low", "Close", "Volume"]].to_csv(prices_dir / f"{ticker}.csv")
     return missing
 
 
