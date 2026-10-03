@@ -9,6 +9,7 @@ the whole company's market cap on each class.
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from pathlib import Path
 
@@ -36,6 +37,20 @@ NASDAQ_SCREENER_URL = "https://api.nasdaq.com/api/screener/stocks?tableonly=true
 def normalize_symbol(symbol: str) -> str:
     """Nasdaq writes share classes as BRK/B; we use BRK.B (Yahoo: BRK-B, SEC: BRK-B)."""
     return symbol.strip().replace("/", ".")
+
+
+SHARE_DESCRIPTION = (
+    r"\s+(?:\(NEW\)\s*)?(?:Class [A-Z]\s+)?"
+    r"(?:Common Stock|Ordinary Shares?|American Deposit[ao]ry Shares?|ADS\b|Sponsored ADR|Common Shares"
+    r"|Common Units|Limited Partnership Units|N\.?Y\.? Registry Shares|New York Registry Shares|Capital Stock"
+    r"|Subordinate voting shares|Shares of Beneficial Interest).*$"
+)
+
+
+def short_name(name: str) -> str:
+    """Company name without the share description: 'Moderna, Inc. Common Stock' -> 'Moderna, Inc.'"""
+    name = re.sub(SHARE_DESCRIPTION, "", str(name), flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", name.replace("(NEW)", "")).strip()
 
 
 def _number(text: pd.Series) -> pd.Series:

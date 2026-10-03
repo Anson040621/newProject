@@ -165,8 +165,11 @@ def test_sctr_table_columns():
     cols = {f"S{i}": random_walk(300, drift=0.0005 * i, seed=i) for i in range(5)}
     close = frame(**cols)
     table = sctr.sctr_table(close, close.index[-1])
-    assert list(table.columns) == ["sctr", "score", "pct_ema200", "roc125", "pct_ema50", "roc20", "ppo_points", "rsi14"]
+    assert list(table.columns) == [
+        "sctr", "chg", "score", "pct_ema200", "roc125", "pct_ema50", "roc20", "ppo_points", "rsi14"]
     assert table["score"].is_monotonic_decreasing
+    previous = sctr.rank_scores(sctr.indicator_score(close)).iloc[-2]
+    assert (table["chg"] == (table["sctr"] - previous.reindex(table.index)).round(1)).all()
 
 
 # --- universe and price loading ----------------------------------------------

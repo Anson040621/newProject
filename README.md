@@ -57,7 +57,8 @@ pip install -r requirements.txt
 export SEC_USER_AGENT="sctr-backtest your@email.com"
 python -m backtest.download_data --start 2015-01-01
 
-# 2a. Top 10 on a given date, with market cap and the six SCTR components
+# 2a. Top 10 on a given date, laid out like StockCharts' SCTR report
+#     (name, sector, SCTR, CHG, close, market cap); --details adds the six indicators
 python -m backtest.pick_stocks --date 2025-09-30
 
 # 2b. Daily top-10 history for the backtest

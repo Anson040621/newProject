@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from backtest.download_data import candidate_tickers
-from backtest.listings import normalize_symbol, parse_listings
+from backtest.listings import normalize_symbol, parse_listings, short_name
 from backtest.marketcap import (
     drop_glitches,
     estimate_market_caps,
@@ -178,3 +178,18 @@ def test_candidate_tickers():
     listings = pd.DataFrame({"market_cap": [5e9, 5e8]}, index=["MID", "TINY"])
     membership = pd.Series([frozenset({"OLD"})], index=pd.to_datetime(["2015-01-01"]))
     assert candidate_tickers(listings, membership, "2016-01-01", "2020-01-01", min_cap=1e9) == ["MID", "OLD"]
+
+
+@pytest.mark.parametrize("name,short", [
+    ("Moderna Inc. Common Stock", "Moderna Inc."),
+    ("Everpure Inc. Class A common stock", "Everpure Inc."),
+    ("United Microelectronics Corporation (NEW) Common Stock", "United Microelectronics Corporation"),
+    ("Alibaba Group Holding Limited American Depositary Shares each representing eight Ordinary share",
+     "Alibaba Group Holding Limited"),
+    ("Alphabet Inc. Class C Capital Stock", "Alphabet Inc."),
+    ("Energy Transfer LP Common Units", "Energy Transfer LP"),
+    ("SAP  SE ADS", "SAP SE"),
+    ("Taiwan Semiconductor Manufacturing Company Ltd.", "Taiwan Semiconductor Manufacturing Company Ltd."),
+])
+def test_short_name(name, short):
+    assert short_name(name) == short

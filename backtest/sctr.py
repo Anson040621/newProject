@@ -133,11 +133,17 @@ def rank_scores(score: pd.DataFrame, universe_mask: pd.DataFrame | None = None) 
 
 
 def sctr_table(close: pd.DataFrame, date, universe_mask: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Full SCTR breakdown for every eligible ticker on one date, best first."""
+    """Full SCTR breakdown for every eligible ticker on one date, best first.
+
+    `chg` is the change in SCTR since the previous trading day, like the CHG
+    column in StockCharts' SCTR report.
+    """
     score = indicator_score(close)
     sctr = rank_scores(score, universe_mask)
     comps = components(close)
-    table = pd.DataFrame({"sctr": sctr.loc[date], "score": score.loc[date]})
+    position = sctr.index.get_loc(date)
+    previous = sctr.iloc[position - 1] if position > 0 else sctr.loc[date] * float("nan")
+    table = pd.DataFrame({"sctr": sctr.loc[date], "chg": (sctr.loc[date] - previous).round(1), "score": score.loc[date]})
     for name, frame in comps.items():
         table[name] = frame.loc[date]
     table = table.dropna(subset=["sctr"]).sort_values("score", ascending=False)
