@@ -21,22 +21,35 @@ Scores are ranked within the universe each day and scaled from 0.0 (weakest)
 to 99.9 (strongest). The 10 highest are the picks. A stock needs 250 days of
 price history before it can be ranked.
 
-**Universe.** StockCharts' Large-Cap universe is "US stocks with a market cap
-over $10B". There is no free source of historical market cap, so we use the
-**S&P 500 as it was on each date** (point-in-time membership from
-[fja05680/sp500](https://github.com/fja05680/sp500)). This avoids survivorship
-bias (testing only on today's winners). Our SCTR values will be close to
-StockCharts' but not identical, because their universe is somewhat larger.
+**Universe.** Like StockCharts' Large-Cap universe: every US-listed stock
+(including foreign ADRs such as UMC) with a market cap over **$10 billion**,
+rebalanced at each month end. A stock must be on the other side of $10B for
+**3 consecutive month ends** before it moves in or out.
+
+Market cap on each past date = price x shares outstanding at the time:
+
+- Today's listings and market caps come from the Nasdaq stock screener.
+- Share-count history comes from SEC filings (10-K/10-Q cover pages), using
+  only filings already published on that date, adjusted for later stock splits.
+- The history is scaled so today's value matches Nasdaq (this handles ADRs and
+  companies with several share classes).
+- Companies with no SEC history use today's share count. Delisted companies with
+  no data at all count as large caps while they were in the S&P 500.
+
+Two other universes are available with `--universe`: `sp500` (the S&P 500 as it
+was on each date) and `all` (every file in `data/prices/`).
 
 ### Usage
 
 ```bash
 pip install -r requirements.txt
 
-# 1. Download membership history + daily prices (Yahoo Finance)
+# 1. Download listings, prices (Yahoo) and share counts (SEC).
+#    The SEC asks for a contact email in every request:
+export SEC_USER_AGENT="sctr-backtest your@email.com"
 python -m backtest.download_data --start 2015-01-01
 
-# 2a. Top 10 on a given date, with the six SCTR components
+# 2a. Top 10 on a given date, with market cap and the six SCTR components
 python -m backtest.pick_stocks --date 2025-09-30
 
 # 2b. Daily top-10 history for the backtest
@@ -46,6 +59,11 @@ python -m backtest.pick_stocks --start 2015-01-01 --out top10_daily.csv
 python -m pytest
 ```
 
+The full download covers ~2,900 stocks (everything worth $1B+ today, since some
+were worth $10B+ in the past, plus all S&P 500 members since the start date) and
+takes about 30 minutes. Without `SEC_USER_AGENT` the SEC step is skipped and
+today's share counts are used for every date.
+
 **Using your own data.** Put one CSV per ticker in `data/prices/<TICKER>.csv`
 with a `Date` (or TradingView `time`) column and a `Close` / `Adj Close`
 column, then run `pick_stocks` with `--universe all` to rank every file in that
@@ -53,11 +71,13 @@ folder.
 
 ### Known limitations
 
-- Yahoo Finance does not carry most delisted companies, so some past S&P 500
-  members will have no prices. `download_data` lists them. This brings back
-  some survivorship bias. For a cleaner test, use a paid source with delisted
-  stocks (e.g. Norgate Data or EODData).
-- The S&P 500 is a proxy for "market cap > $10B"; see above.
+- Yahoo Finance does not carry most delisted companies, so some past large caps
+  have no prices (`download_data` lists them). This brings back some
+  survivorship bias. For a cleaner test, use a paid source with delisted stocks
+  (e.g. Norgate Data or EODData).
+- Market caps before a company's first SEC filing, or for companies that report
+  shares irregularly, are estimates. StockCharts' exact rebalancing day is not
+  published; we use month ends.
 
 ## Next steps
 

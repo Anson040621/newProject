@@ -126,7 +126,15 @@ def test_score_requires_min_history():
 def test_rank_scores_spread_0_to_99_9():
     score = frame(A=[1.0], B=[5.0], C=[3.0])
     ranked = sctr.rank_scores(score).iloc[0]
-    assert ranked.to_dict() == {"A": 0.0, "B": 99.9, "C": 50.0}
+    # C sits exactly in the middle: 49.95, truncated to 49.9 like StockCharts.
+    assert ranked.to_dict() == {"A": 0.0, "B": 99.9, "C": 49.9}
+
+
+def test_rank_scores_truncates_like_stockcharts():
+    # With ~912 stocks the 2nd best is 99.79... which StockCharts shows as 99.7.
+    score = pd.DataFrame([np.arange(912.0)], index=pd.bdate_range("2024-01-01", periods=1))
+    ranked = sctr.rank_scores(score).iloc[0].sort_values(ascending=False)
+    assert list(ranked.iloc[:3]) == [99.9, 99.7, 99.6]
 
 
 def test_rank_scores_respects_universe_mask():
