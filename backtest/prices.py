@@ -15,6 +15,7 @@ instead of downloading; they only need a Date column and a Close column.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -43,7 +44,76 @@ def download_prices(tickers, start, end=None, prices_dir: Path = PRICES_DIR, bat
         # locked"); retry the failures one at a time.
         print(f"  retrying {len(missing)} failed tickers one at a time", flush=True)
         missing = _download_batch(missing, start, end, prices_dir, threads=False)
+    if end is None:
+        filled = fill_latest_session([t for t in tickers if t not in missing], prices_dir)
+        if filled:
+            print(f"  filled the latest close from Yahoo quotes for {filled} tickers", flush=True)
     return missing
+
+
+def _session_quote(ticker: str) -> dict | None:
+    """Official close of the most recent *finished* regular session, from Yahoo's chart metadata.
+
+    Yahoo's daily bar for the latest session is sometimes empty for hours after
+    the close, while the metadata already holds the official closing price.
+    """
+    import json
+    import urllib.request
+
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{yahoo_symbol(ticker)}?interval=1d&range=5d"
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as resp:
+                meta = json.load(resp)["chart"]["result"][0]["meta"]
+            break
+        except Exception:
+            if attempt == 3:
+                return None
+            time.sleep(2**attempt)
+    session = meta.get("currentTradingPeriod", {}).get("regular", {})
+    price, when = meta.get("regularMarketPrice"), meta.get("regularMarketTime")
+    if not price or not when or not session.get("end") or when < session["end"]:
+        return None  # session still open, or no data
+    day = pd.Timestamp(session["start"], unit="s", tz="UTC").tz_convert(meta.get("exchangeTimezoneName", "America/New_York"))
+    return {
+        "Date": day.tz_localize(None).normalize(),
+        "Open": float("nan"),
+        "High": meta.get("regularMarketDayHigh", float("nan")),
+        "Low": meta.get("regularMarketDayLow", float("nan")),
+        "Close": price,
+        "Adj Close": price,  # the latest close is never dividend-adjusted
+        "Volume": meta.get("regularMarketVolume", float("nan")),
+        "Stock Splits": 0.0,
+    }
+
+
+def fill_latest_session(tickers, prices_dir: Path = PRICES_DIR, workers: int = 8) -> int:
+    """Append the latest session's close to files that are missing it. Returns how many were filled.
+
+    Only tickers that traded in the last 10 days are checked (delisted ones are skipped).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    last_dates = {}
+    for ticker in tickers:
+        path = prices_dir / f"{ticker}.csv"
+        if path.exists():
+            last_dates[ticker] = pd.Timestamp(pd.read_csv(path, usecols=[0]).iloc[-1, 0])
+    if not last_dates:
+        return 0
+    newest = max(last_dates.values())
+    recent = [t for t, d in last_dates.items() if d >= newest - pd.Timedelta(days=10)]
+
+    filled = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for ticker, quote in zip(recent, pool.map(_session_quote, recent)):
+            if quote is None or quote["Date"] <= last_dates[ticker]:
+                continue
+            row = pd.DataFrame([quote]).set_index("Date")[COLUMNS]
+            row.to_csv(prices_dir / f"{ticker}.csv", mode="a", header=False)
+            filled += 1
+    return filled
 
 
 def _download_batch(batch, start, end, prices_dir: Path, threads: bool) -> list[str]:

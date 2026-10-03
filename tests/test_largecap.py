@@ -5,6 +5,7 @@ import pytest
 from backtest.download_data import candidate_tickers
 from backtest.listings import normalize_symbol, parse_listings
 from backtest.marketcap import (
+    drop_glitches,
     estimate_market_caps,
     large_cap_mask,
     large_cap_universe,
@@ -36,6 +37,29 @@ def test_parse_listings():
     assert normalize_symbol(" BF/B ") == "BF.B"
 
 
+@pytest.mark.parametrize("name,kept", [
+    # Not common equity, but listed with the parent company's market cap: dropped
+    ("AGNC Investment Corp. Depositary Shares each representing a 1/1000th interest in a share of 6.50% "
+     "Series E Fixed-to-Floating Cumulative Redeemable Preferred Stock", False),
+    ("Apollo Global Management Inc. 7.625% Fixed-Rate Resettable Junior Subordinated Notes due 2053", False),
+    ("Alphabet Inc. Depositary Shares representing a 1/20th Interest in a Share of Series A Mandatory Convertible", False),
+    ("SLM Corporation Floating Rate Non-Cumulative Preferred Stock Series B", False),
+    ("BrightSpring Health Services Inc. Tangible Equity Unit", False),
+    ("Southern Company (The) 2025 Series A Corporate Units", False),
+    ("Comcast Holdings ZONES", False),
+    # Real stocks: kept
+    ("Microchip Technology Incorporated Common Stock", True),
+    ("Itau Unibanco Banco Holding SA American Depositary Shares (Each repstg 500 Preferred shares)", True),
+    ("Alibaba Group Holding Limited American Depositary Shares each representing eight Ordinary share", True),
+    ("Energy Transfer LP Common Units", True),
+    ("Bank Nova Scotia Halifax Pfd 3 Ordinary Shares", True),
+])
+def test_parse_listings_drops_non_common_securities(name, kept):
+    row = listing_row("XYZ", "$25.00", "30,000,000,000.00")
+    row["name"] = name
+    assert ("XYZ" in parse_listings({"data": {"rows": [row]}}).index) == kept
+
+
 def test_parse_concept_dedupes_and_sorts():
     payload = {"units": {"shares": [
         {"end": "2020-04-15", "val": 110, "filed": "2020-05-01", "form": "10-Q"},
@@ -64,11 +88,23 @@ def test_shares_known_on_is_point_in_time_and_split_adjusted():
     })
     splits = pd.Series([2.0], index=pd.to_datetime(["2020-03-02"]))  # 2-for-1 between the filings
     index = pd.bdate_range("2020-01-02", "2020-09-30")
-    shares = shares_known_on(filings, splits, index)
+    shares = shares_known_on(filings, splits, index, current=205.0)
     assert shares["2020-01-02"] == 200.0   # before the first filing: first value, split-adjusted
     assert shares["2020-04-30"] == 200.0   # second filing not public yet
     assert shares["2020-05-01"] == 205.0
-    assert shares["2020-09-30"] == 205.0   # outlier ignored
+    assert shares["2020-09-30"] == 205.0   # bad latest filing ignored: today's count agrees with the previous one
+
+
+def test_drop_glitches_keeps_lasting_changes():
+    # An isolated typo in the middle is dropped.
+    assert list(drop_glitches(np.array([100.0, 100_000.0, 101.0, 102.0]))) == [True, False, True, True]
+    # A merger that multiplies the share count (QXO, TeraWulf) is kept: every later filing agrees.
+    merger = np.array([4.5, 4.6, 4.7, 400.0, 420.0, 430.0])
+    assert drop_glitches(merger, current=430.0).all()
+    # A jump in the latest filing is kept when today's share count confirms it...
+    assert drop_glitches(np.array([4.5, 4.6, 450.0]), current=455.0).all()
+    # ...and dropped when today's share count says it did not happen.
+    assert list(drop_glitches(np.array([4.5, 4.6, 4600.0]), current=4.7)) == [True, True, False]
 
 
 def test_estimate_market_caps_calibrates_to_nasdaq():

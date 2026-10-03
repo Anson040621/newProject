@@ -35,6 +35,14 @@ Market cap on each past date = price x shares outstanding at the time:
   companies with several share classes).
 - Companies with no SEC history use today's share count. Delisted companies with
   no data at all count as large caps while they were in the S&P 500.
+- Preferred shares, notes, warrants and units are left out (the screener lists
+  them with the parent company's market cap).
+
+**Check against StockCharts.** On 2026-10-02 the top 11 matched StockCharts'
+Large-Cap SCTR report exactly, ticker and value (MRNA 99.9, DELL 99.7, UMC
+99.6, HPE 99.5, AMD 99.4, OKTA 99.3, CRWD 99.2, ALAB 99.1, MU 99.0, P 98.9,
+SMTC 98.8). The one difference was CORT, which had just completed its third
+month above $10B: we add it the day after the month end, StockCharts later.
 
 Two other universes are available with `--universe`: `sp500` (the S&P 500 as it
 was on each date) and `all` (every file in `data/prices/`).
@@ -76,8 +84,16 @@ folder.
   survivorship bias. For a cleaner test, use a paid source with delisted stocks
   (e.g. Norgate Data or EODData).
 - Market caps before a company's first SEC filing, or for companies that report
-  shares irregularly, are estimates. StockCharts' exact rebalancing day is not
-  published; we use month ends.
+  shares irregularly, are estimates. Stocks without SEC filings rely on the
+  Nasdaq screener's market cap, which is occasionally wrong (e.g. a small fund
+  listed at $13B). A few such stocks near $10B can be misclassified.
+- StockCharts does not publish its rebalancing day; we apply changes on the
+  first trading day after each month end, which can be a few days early.
+- A ticker that changed (e.g. Paramount, now PSKY) only has SEC share history
+  under its new company, so its earlier years may be missed.
+- Yahoo sometimes leaves the latest daily bar empty for hours after the close;
+  `download_data` fills that day from Yahoo's quote data (close, high, low,
+  volume).
 
 ## Next steps
 

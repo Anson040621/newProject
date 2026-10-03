@@ -17,6 +17,19 @@ import pandas as pd
 from .universe import DATA_DIR
 
 LISTINGS_FILE = DATA_DIR / "listings.csv"
+
+# Securities that are not common equity but show the parent company's market
+# cap in the screener: preferred shares, notes, warrants, rights and units.
+# Partnership units (ET, MPLX) and ADRs that represent preferred shares (ITUB,
+# CIB) are a company's main traded equity and are kept.
+NON_COMMON = (
+    r"\d+(?:\.\d+)?\s?%"                           # coupon rate: preferreds and notes
+    r"|\bNotes?\b|Debenture|Subordinated"
+    r"|\bWarrants?\b|\bRights\b"
+    r"|Preferred Stock|Preferred Securities|Preferred Units|Mandatory Convertible"
+    r"|Interest in a Share"                           # depositary shares of a preferred issue
+    r"|Corporate Units|Equity Units?\b|Tangible Equity|\bZONES\b"
+)
 NASDAQ_SCREENER_URL = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&download=true"
 
 
@@ -32,7 +45,8 @@ def _number(text: pd.Series) -> pd.Series:
 def parse_listings(payload: dict) -> pd.DataFrame:
     """Turn the screener's JSON into a table indexed by ticker.
 
-    Preferred shares (symbols with ^) and rows without a market cap are dropped.
+    Preferred shares, notes, warrants, units (see NON_COMMON) and rows without a
+    market cap are dropped.
     """
     rows = pd.DataFrame(payload["data"]["rows"])
     table = pd.DataFrame(
@@ -46,7 +60,8 @@ def parse_listings(payload: dict) -> pd.DataFrame:
             "industry": rows["industry"],
         }
     )
-    table = table[~table["ticker"].str.contains(r"\^") & (table["market_cap"] > 0) & (table["last_price"] > 0)]
+    common = ~table["ticker"].str.contains(r"\^") & ~table["name"].str.contains(NON_COMMON, case=False, regex=True)
+    table = table[common & (table["market_cap"] > 0) & (table["last_price"] > 0)]
     return table.drop_duplicates("ticker").set_index("ticker").sort_index()
 
 

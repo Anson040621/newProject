@@ -27,8 +27,9 @@ from .universe import membership_mask
 
 LARGE_CAP = 10e9
 CONFIRM_MONTHS = 3
-# A filing whose split-adjusted share count is 10x away from the company's
-# median is treated as a data error (e.g. reported in thousands).
+# A filing whose split-adjusted share count is 10x away from both neighbouring
+# filings is treated as a data error (e.g. reported in thousands). A lasting
+# change (a merger, a SPAC deal) moves every later filing and is kept.
 OUTLIER_FACTOR = 10.0
 
 
@@ -43,16 +44,38 @@ def split_factors_after(as_of: pd.Series, splits: pd.Series) -> np.ndarray:
     return suffix[positions]
 
 
-def shares_known_on(filings: pd.DataFrame, splits: pd.Series, index: pd.DatetimeIndex) -> pd.Series:
+def _far(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return (a > b * OUTLIER_FACTOR) | (a < b / OUTLIER_FACTOR)
+
+
+def drop_glitches(values: np.ndarray, current: float | None = None) -> np.ndarray:
+    """Boolean mask of share counts to keep.
+
+    An interior value is a glitch when it is 10x away from both neighbours. The
+    latest value has only one neighbour, so it is a glitch when it is 10x away
+    from the previous filing while today's share count (`current`, from Nasdaq)
+    agrees with the previous filing, i.e. the jump did not really happen.
+    """
+    keep = np.ones(len(values), dtype=bool)
+    if len(values) >= 3:
+        keep[1:-1] = ~(_far(values[1:-1], values[:-2]) & _far(values[1:-1], values[2:]))
+    if len(values) >= 2 and current and _far(values[-1:], values[-2:-1])[0] and not _far(np.array([current]), values[-2:-1])[0]:
+        keep[-1] = False
+    return keep
+
+
+def shares_known_on(
+    filings: pd.DataFrame, splits: pd.Series, index: pd.DatetimeIndex, current: float | None = None
+) -> pd.Series:
     """Split-adjusted shares outstanding as known on each date (point in time by filing date).
 
-    Dates before the first filing use the first filing's value.
+    Dates before the first filing use the first filing's value. `current` is
+    today's share count, used to spot a bad latest filing.
     """
     filings = filings.sort_values(["filed", "end"])
     adjusted = filings["shares"].to_numpy() * split_factors_after(filings["end"], splits)
     adjusted = pd.Series(adjusted, index=pd.DatetimeIndex(filings["filed"]))
-    median = adjusted.median()
-    adjusted = adjusted[(adjusted < median * OUTLIER_FACTOR) & (adjusted > median / OUTLIER_FACTOR)]
+    adjusted = adjusted[drop_glitches(adjusted.to_numpy(), current)]
     known = adjusted.groupby(level=0).last()
     return known.reindex(index.union(known.index)).ffill().reindex(index).bfill()
 
@@ -74,7 +97,7 @@ def estimate_market_caps(
         filings = filings_by_ticker.get(ticker)
         today = current_shares.get(ticker)
         if filings is not None and not filings.empty:
-            history = shares_known_on(filings, splits[ticker], close.index)
+            history = shares_known_on(filings, splits[ticker], close.index, today)
             if today is not None and history.iloc[-1] > 0:
                 history = history * (today / history.iloc[-1])
         elif today is not None:
@@ -131,13 +154,20 @@ def large_cap_universe(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Estimated market caps and the large-cap universe mask.
 
-    Stocks with no market-cap information at all (delisted, no SEC record) are
-    treated as large caps while they were in the S&P 500, if `membership` is given.
+    Only common stocks on today's listings, plus former S&P 500 members (to
+    cover delisted companies), can join. This keeps out preferred shares and
+    notes that trade under their own ticker. Former members with no market-cap
+    information at all (no SEC record) count as large caps while they were in
+    the S&P 500.
     """
-    mcap = estimate_market_caps(close, splits, shares, listings)
+    eligible = set(listings.index)
+    if membership is not None:
+        eligible |= set().union(*membership)
+    columns = [t for t in close.columns if t in eligible]
+    mcap = estimate_market_caps(close[columns], splits[columns], shares, listings).reindex(columns=close.columns)
     mask = large_cap_mask(mcap, threshold, confirm_months)
     if membership is not None:
-        unknown = mcap.columns[mcap.isna().all()]
+        unknown = [t for t in columns if mcap[t].isna().all()]
         if len(unknown):
             fallback = membership_mask(membership, mcap.index, unknown) & close[unknown].notna()
             mask.loc[:, unknown] = fallback.to_numpy()

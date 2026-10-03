@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from backtest import sctr
+from backtest import prices
 from backtest.prices import load_closes
 from backtest.universe import load_membership, members_on, membership_mask, tickers_between
 
@@ -191,3 +192,35 @@ def test_load_closes_yahoo_and_tradingview_formats(tmp_path):
     closes = load_closes(prices_dir=tmp_path)
     assert list(closes.columns) == ["AAA", "BBB", "CCC"]
     assert closes.loc["2024-01-03"].to_dict() == {"AAA": 11.0, "BBB": 21.0, "CCC": 41.0}
+
+
+def test_fill_latest_session_appends_missing_close(tmp_path, monkeypatch):
+    (tmp_path / "AAA.csv").write_text(
+        "Date,Open,High,Low,Close,Adj Close,Volume,Stock Splits\n2026-10-01,1,1,1,10,9.5,100,0.0\n")
+    (tmp_path / "BBB.csv").write_text(
+        "Date,Open,High,Low,Close,Adj Close,Volume,Stock Splits\n2026-10-02,1,1,1,20,20,100,0.0\n")
+    quote = {"Date": pd.Timestamp("2026-10-02"), "Open": np.nan, "High": 11.0, "Low": 9.0,
+             "Close": 10.5, "Adj Close": 10.5, "Volume": 200.0, "Stock Splits": 0.0}
+    monkeypatch.setattr(prices, "_session_quote", lambda ticker: dict(quote))
+    assert prices.fill_latest_session(["AAA", "BBB"], tmp_path) == 1  # BBB already has the day
+    data = prices.load_prices(prices_dir=tmp_path)
+    assert data["close"].loc["2026-10-02"].to_dict() == {"AAA": 10.5, "BBB": 20.0}
+    assert data["adj_close"].loc["2026-10-01", "AAA"] == 9.5
+
+
+def test_session_quote_needs_a_finished_session(monkeypatch):
+    import io
+    import json
+
+    def fake_meta(when):
+        meta = {"regularMarketPrice": 333.69, "regularMarketTime": when, "regularMarketDayHigh": 334.54,
+                "regularMarketDayLow": 330.61, "regularMarketVolume": 31878433,
+                "exchangeTimezoneName": "America/New_York",
+                "currentTradingPeriod": {"regular": {"start": 1790947800, "end": 1790971200}}}
+        return lambda request, timeout: io.BytesIO(json.dumps({"chart": {"result": [{"meta": meta}]}}).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_meta(1790971201))  # 16:00:01 New York time
+    quote = prices._session_quote("AAPL")
+    assert quote["Date"] == pd.Timestamp("2026-10-02") and quote["Close"] == 333.69
+    monkeypatch.setattr("urllib.request.urlopen", fake_meta(1790960000))  # 12:53, market still open
+    assert prices._session_quote("AAPL") is None
