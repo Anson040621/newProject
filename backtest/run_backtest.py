@@ -73,17 +73,18 @@ def main(argv=None):
     parser.add_argument("--min-sctr", type=float, default=defaults.min_sctr)
     parser.add_argument("--take-profit", type=float, default=defaults.take_profit, help="e.g. 0.08 = +8%%")
     parser.add_argument("--ema-exit-days", type=int, default=defaults.ema_exit_days,
-                        help="consecutive closes below the 20 EMA before selling the rest (default 1)")
+                        help="consecutive closes below the 20 EMA before selling the rest (default 3)")
     parser.add_argument("--no-squeeze", action="store_true",
                         help="drop the squeeze (blue cross) entry condition")
     parser.add_argument("--atr-exit-on-touch", action="store_true",
                         help="before +8%%: sell when the price touches the ATR trail, not at the next open after a close below it")
-    parser.add_argument("--entry-on-touch", action="store_true",
-                        help="buy intraday when the price touches the ATR flip level (instead of the next open)")
+    parser.add_argument("--entry-on-touch", action=argparse.BooleanOptionalAction, default=defaults.entry_on_touch,
+                        help="buy intraday when the price touches the ATR flip level (default on); "
+                             "--no-entry-on-touch buys at the next open after a close-based flip")
     parser.add_argument("--emergency-stop", type=float, default=0.0,
                         help="sell everything at this loss from entry, e.g. 0.09 = -9%% (default off)")
-    parser.add_argument("--reentry-days", type=int, default=0,
-                        help="re-buy if the ATR flips back to BUY within N days of an early exit (default off)")
+    parser.add_argument("--reentry-days", type=int, default=defaults.reentry_days,
+                        help="re-buy if the ATR flips back to BUY within N days of an early exit (default 5, 0 = off)")
     parser.add_argument("--cost", type=float, default=defaults.cost, help="cost per buy/sell, e.g. 0.001 = 0.1%%")
     parser.add_argument("--trades-out", default="backtest_trades.csv")
     parser.add_argument("--equity-out", default="backtest_equity.csv")

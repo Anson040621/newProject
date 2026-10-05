@@ -1,29 +1,26 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults):
-  Entry   the stock is in the day's SCTR top 10 (SCTR > 90) AND, on the same
-          day, the squeeze is on, the momentum bar is red and the 2x ATR trail
-          flips to BUY. Buy at the next day's open.
+Rules (defaults = "version G"):
+  Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
+  Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
+          crosses), the momentum bar is red and the 2x ATR trail is in a
+          down-trend. Next day: buy the moment the price touches the ATR flip
+          level (that close's trail line), or at the open if it gaps above.
   Size    15% of account equity per trade, at most 6 positions. When more
           signals than free slots appear, the highest SCTR goes first.
-  Exit    before +8%: sell everything at the next open after the ATR trail
-                      flips to exit (or, with --atr-exit-on-touch, the moment
-                      the price touches the trail line during the day).
+  Exit    before +8%: sell everything at the next open after a close below the
+                      ATR trail line (the trail flips to exit).
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
-          after +8%:  sell the rest at the next open after a close below the
-                      20 EMA (or N consecutive closes, --ema-exit-days), once
-                      price has closed above the 20 EMA since entry.
+          after +8%:  sell the rest at the next open after 3 closes in a row
+                      below the 20 EMA, once price has closed above the 20 EMA
+                      since entry.
+  Re-entry after an exit before +8%, buy again if the ATR trail flips back to
+          BUY within 5 trading days (no other conditions).
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
 
-Optional rules (off by default):
-  --entry-on-touch     buy during the day the moment the price touches the ATR
-                       flip level (yesterday's trail line), if yesterday the stock
-                       was in the top 10 with the squeeze on and a red bar.
-  --emergency-stop X   sell everything the moment the price is X below the entry
-                       (e.g. 0.09 = -9%), at any time.
-  --reentry-days N     after an exit before +8% (ATR exit or emergency stop), buy
-                       again if the ATR trail flips back to BUY within N trading
-                       days (no other conditions).
+Other options (off by default): --atr-exit-on-touch (intraday ATR stop before
++8%), --emergency-stop X (sell at -X from entry), --no-entry-on-touch (buy at the
+next open after a close-based flip), --reentry-days 0, --ema-exit-days 1.
 
 Prices are split-adjusted, not dividend-adjusted (like a TradingView chart);
 dividends received are ignored.
@@ -46,11 +43,11 @@ class Rules:
     max_positions: int = 6
     take_profit: float = 0.08
     take_profit_fraction: float = 1 / 3
-    ema_exit_days: int = 1  # consecutive closes below the 20 EMA before selling the rest
+    ema_exit_days: int = 3  # consecutive closes below the 20 EMA before selling the rest
     atr_exit_on_touch: bool = False  # before +8%: sell the moment price touches the ATR trail
-    entry_on_touch: bool = False  # buy intraday when price touches the ATR flip level
+    entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
     emergency_stop: float = 0.0  # e.g. 0.09: sell everything at -9% from entry (0 = off)
-    reentry_days: int = 0  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
+    reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     cost: float = 0.001
     capital: float = 100_000.0
 

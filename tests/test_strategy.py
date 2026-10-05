@@ -54,6 +54,19 @@ def test_atr_trail_flips():
 
 # --- portfolio simulation ----------------------------------------------------
 
+def basic_rules(**overrides):
+    """Next-open entries, 1-day EMA exit, no re-entry; each test switches on what it checks."""
+    settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0)
+    settings.update(overrides)
+    return strategy.Rules(**settings)
+
+
+def test_default_rules_are_version_g():
+    rules = strategy.Rules()
+    assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
+    assert (rules.entry_on_touch, rules.ema_exit_days, rules.reentry_days) == (True, 3, 5)
+    assert not rules.atr_exit_on_touch and rules.emergency_stop == 0.0
+
 def make_world(closes, entry_day, exit_flags=None, ema=None):
     """One ticker with a flat open = close, highs 1% above the close."""
     dates = pd.bdate_range("2024-01-01", periods=len(closes))
@@ -76,7 +89,7 @@ def test_buys_next_open_and_exits_on_atr_flip_before_target():
     closes = [100, 100, 101, 102, 99, 98, 98]
     exits = [False, False, False, False, True, False, False]
     dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
-    rules = strategy.Rules(cost=0.0)
+    rules = basic_rules(cost=0.0)
     equity, trades = strategy.run(dates, prices, sigs, top, rules)
     trade = trades.iloc[0]
     assert trade["entry_date"] == dates[2] and trade["entry_price"] == 101  # next day's open
@@ -91,7 +104,7 @@ def test_take_profit_then_ema_exit_once_armed():
     closes = [100, 100, 100, 109, 112, 111, 105, 104]
     ema = [101, 101, 101, 110, 110, 110, 110, 110]  # 109 < 110 (not armed yet), 112 > 110 arms it
     dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
-    equity, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0))
+    equity, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
     trade = trades.iloc[0]
     assert trade["took_profit"]
     fills = trade["exits"].split("; ")
@@ -104,7 +117,7 @@ def test_ignores_atr_exit_after_take_profit_and_respects_max_positions():
     closes = [100, 100, 100, 110, 111, 112]
     exits = [False, False, False, False, True, False]
     dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
     assert trades.iloc[0]["exits"].endswith("open at end 100@112.00")  # the ATR flip no longer applies
 
     # Seven tickers signal on the same day; only six slots: the lowest SCTR is skipped.
@@ -112,7 +125,7 @@ def test_ignores_atr_exit_after_take_profit_and_respects_max_positions():
     prices = {f"T{i}": prices["AAA"] for i in range(7)}
     sigs = {f"T{i}": sigs["AAA"] for i in range(7)}
     top = pd.concat([top.assign(ticker=f"T{i}", rank=i + 1, sctr=99.9 - i) for i in range(7)])
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
     assert sorted(trades["ticker"]) == [f"T{i}" for i in range(6)]
 
 
@@ -121,7 +134,7 @@ def test_ema_exit_waits_for_consecutive_closes_below():
     closes = [100, 100, 100, 109, 112, 105, 105, 112, 105, 104, 103, 102]
     ema = [101] * 3 + [110] * 9
     dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, ema_exit_days=3))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, ema_exit_days=3))
     fills = trades.iloc[0]["exits"].split("; ")
     assert fills[1].startswith(f"{dates[11].date()} exit 100@102.00")  # 3rd close below on day 10, sold day 11
 
@@ -140,13 +153,13 @@ def test_atr_stop_on_touch_sells_intraday():
     closes = [100, 100, 100, 99, 99, 99]
     dates, prices, sigs, top = make_world(closes, entry_day=1)
     sigs["AAA"]["atr_stop"] = [np.nan, np.nan, 95.0, 98.5, 98.5, 98.5]  # day 3 low (98.01) touches 98.5
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, atr_exit_on_touch=True))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, atr_exit_on_touch=True))
     trade = trades.iloc[0]
     assert trade["exit_date"] == dates[3]
     assert trade["exits"] == f"{dates[3].date()} atr-stop 150@98.50"
     # A gap below the line fills at the open instead.
     prices["AAA"].loc[dates[3], ["open", "low"]] = [97.0, 96.0]
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, atr_exit_on_touch=True))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, atr_exit_on_touch=True))
     assert trades.iloc[0]["exits"].endswith("atr-stop 150@97.00")
 
 
@@ -156,7 +169,7 @@ def test_ema_exit_never_applies_before_take_profit():
     closes = [100, 100, 100, 102, 99, 98, 97, 96]
     ema = [101, 101, 99, 99, 101, 101, 101, 101]
     dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, atr_exit_on_touch=True))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, atr_exit_on_touch=True))
     assert "open at end" in trades.iloc[0]["exits"]
 
 
@@ -164,7 +177,7 @@ def test_emergency_stop_sells_at_minus_9_percent():
     closes = [100, 100, 100, 95, 93, 93]
     dates, prices, sigs, top = make_world(closes, entry_day=1)
     prices["AAA"].loc[dates[4], "low"] = 90.0  # touches 100 x 0.91 = 91 during the day
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, emergency_stop=0.09))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, emergency_stop=0.09))
     assert trades.iloc[0]["exits"] == f"{dates[4].date()} emergency-stop 150@91.00"
 
 
@@ -173,13 +186,13 @@ def test_reentry_when_atr_flips_back_within_window():
     exits = [False, False, False, True, False, False, False, False, False, False]
     dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
     sigs["AAA"]["atr_buy"] = [False] * 6 + [True] + [False] * 3  # flips back on day 6
-    rules = strategy.Rules(cost=0.0, reentry_days=5)
+    rules = basic_rules(cost=0.0, reentry_days=5)
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert list(trades["entry_date"]) == [dates[2], dates[7]]  # exit day 4, flip day 6 -> buy day 7
     assert list(trades["reentry"]) == [False, True]
     # The same flip outside the window is ignored.
     sigs["AAA"]["atr_buy"] = [False] * 9 + [True]
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, reentry_days=3))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=3))
     assert len(trades) == 1
 
 
@@ -190,6 +203,6 @@ def test_entry_on_touch_buys_at_flip_level():
     sig["setup"] = [False, True, False, False, False, False]  # squeeze + red bar on day 1
     sig["trend"] = [-1, -1, 1, 1, 1, 1]
     sig["flip_level"] = [np.nan, np.nan, 100.5, np.nan, np.nan, np.nan]  # day 1's down-trend trail
-    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, entry_on_touch=True))
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True))
     trade = trades.iloc[0]
     assert trade["entry_date"] == dates[2] and trade["entry_price"] == 100.5  # day 2 high 101 touches 100.5
