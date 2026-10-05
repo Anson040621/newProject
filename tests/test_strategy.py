@@ -62,12 +62,13 @@ def basic_rules(**overrides):
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_15():
+def test_default_rules_are_version_13():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
-    assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.02, 3, 5)
-    assert (rules.atr_exit_on_touch, rules.atr_stop_buffer, rules.sticky_stop, rules.close_exit) == (True, 0.03, True, False)
-    assert rules.emergency_stop == 0.12 and not rules.rebuy_shakeouts
+    assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
+    assert (rules.atr_exit_on_touch, rules.atr_stop_buffer, rules.close_exit) == (True, 0.05, True)
+    assert not rules.sticky_stop and rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
+
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
     """One ticker with a flat open = close, highs 1% above the close."""
