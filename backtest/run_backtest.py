@@ -83,10 +83,17 @@ def main(argv=None):
                         help="consecutive closes below the 20 EMA before selling the rest (default 3)")
     parser.add_argument("--no-squeeze", action="store_true",
                         help="drop the squeeze (blue cross) entry condition")
-    parser.add_argument("--atr-exit-on-touch", action="store_true",
-                        help="before +8%%: sell when the price touches the ATR trail, not at the next open after a close below it")
+    parser.add_argument("--atr-exit-on-touch", action=argparse.BooleanOptionalAction, default=defaults.atr_exit_on_touch,
+                        help="before +8%%: sell when the price touches the ATR stop (default on); "
+                             "--no-atr-exit-on-touch = version G (sell at the next open after a close below the line)")
+    parser.add_argument("--close-exit", action=argparse.BooleanOptionalAction, default=defaults.close_exit,
+                        help="with the intraday stop: also sell at the next open after a close below the line (default off)")
+    parser.add_argument("--sticky-stop", action=argparse.BooleanOptionalAction, default=defaults.sticky_stop,
+                        help="keep the last stop when the green line disappears, never lower it (default on)")
+    parser.add_argument("--entry-buffer", type=float, default=defaults.entry_buffer,
+                        help="buy-stop this far above the ATR flip level, e.g. 0.02 = 2%% (default)")
     parser.add_argument("--atr-stop-buffer", type=float, default=defaults.atr_stop_buffer,
-                        help="with --atr-exit-on-touch: put the stop this far below the ATR line, e.g. 0.03 = 3%%")
+                        help="put the intraday stop this far below the ATR line, e.g. 0.03 = 3%% (default)")
     parser.add_argument("--rebuy-shakeouts", action="store_true",
                         help="after an intraday ATR stop, buy back at the next open if the close is still in an up-trend")
     parser.add_argument("--entry-on-touch", action=argparse.BooleanOptionalAction, default=defaults.entry_on_touch,
@@ -110,7 +117,8 @@ def main(argv=None):
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
-        atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts, park_cost=args.park_cost,
+        atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
+        close_exit=args.close_exit, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None

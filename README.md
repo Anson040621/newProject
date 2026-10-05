@@ -102,21 +102,25 @@ folder.
 from "SEPA", and the "2x ATR Trailing Exit"); `backtest/strategy.py` simulates
 the portfolio day by day.
 
-The defaults are the chosen rule set ("version G"):
+The defaults are the current rule set ("version #14"):
 
 | Rule | Default |
 |---|---|
 | Stocks | daily SCTR top 10 among US stocks over $10B (`--top`, `--min-sctr 90`) |
 | Setup (at a close) | in the top 10, squeeze on (blue crosses), momentum bar red, ATR trail in a down-trend |
-| Entry | next day, buy the moment the price touches the ATR flip level (at the open if it gaps above); `--no-entry-on-touch` buys at the next open after a close-based flip instead |
+| Entry | next day, buy-stop 2% above the ATR flip level (`--entry-buffer`); filled when the price touches it, at the open if it gaps above |
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
-| Exit before +8% | everything at the next open after a close below the ATR trail line |
+| Exit before +8% | sell everything the moment the price touches 3% below the previous close's green ATR line (`--atr-stop-buffer`), at the open if it gaps below; the stop keeps its last level when the line disappears and never moves down (`--no-sticky-stop` to turn off); no sale on a close below the line (`--close-exit` to add it) |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
 | Exit after +8% | the rest at the next open after 3 closes in a row below the 20 EMA (`--ema-exit-days`), once price has closed above it |
-| Re-entry | after an exit before +8%, buy again if the ATR flips back to BUY within 5 trading days (`--reentry-days`, 0 = off) |
+| Re-entry | after an exit before +8%, if the ATR flips back to BUY within 5 trading days, buy-stop 2% above the flip level (`--reentry-days`, 0 = off) |
 | Costs | 0.1% per buy and per sell (`--cost`) |
-| Other options | `--atr-exit-on-touch` (intraday ATR stop before +8%), `--emergency-stop 0.09` (sell at -9% from entry), `--park QQQ` (keep all money not in a trade in QQQ; 0.05% per move, `--park-cost`), `--atr-stop-buffer 0.03` (with `--atr-exit-on-touch`: the stop sits 3% below the line), `--rebuy-shakeouts` (buy back at the next open when the intraday stop sold but the close is still in an up-trend) |
+| Other options | `--no-atr-exit-on-touch` (version G: sell at the next open after a close below the line), `--emergency-stop 0.09`, `--park QQQ`, `--rebuy-shakeouts` |
 
+Earlier versions for comparison: version G = `--no-atr-exit-on-touch --entry-buffer 0`;
+version #13 = `--close-exit --atr-stop-buffer 0.05 --entry-buffer 0 --no-sticky-stop`.
+
+Version G results:
 2015-01-02 to 2026-10-02: $100k -> $254k (8.3% a year, worst drawdown -36%,
 344 trades, 45% winners) vs SPY 13.8% a year. Most of the gain came in 2020
 (+80%); excluding 2020 the strategy returned about 3% a year.
