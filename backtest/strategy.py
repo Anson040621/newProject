@@ -19,7 +19,7 @@ Rules (defaults = "version G"):
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
 
 Other options (off by default): --atr-exit-on-touch (intraday ATR stop before
-+8%; --atr-stop-buffer 0.03 puts it 3% below the line; --rebuy-shakeouts buys back
++8%, on top of the close-based exit; --atr-stop-buffer 0.03 puts it 3% below the line; --rebuy-shakeouts buys back
 at the next open when the stop sold but the close is still in an up-trend),
 --emergency-stop X (sell at -X from entry), --no-entry-on-touch (buy at the next
 open after a close-based flip), --reentry-days 0, --ema-exit-days 1.
@@ -249,7 +249,10 @@ def run(
             last_close[pos.ticker] = close
             pos.closes_below_ema = pos.closes_below_ema + 1 if close < ema20 else 0
             if not pos.tp_taken:
-                if not rules.atr_exit_on_touch and bool(sig.at[day, "atr_exit"]):
+                # A close below the ATR line (the trail flips to SELL) always exits at the
+                # next open, also with the intraday stop: with --atr-stop-buffer the stop
+                # sits below the line, so a close can land between the two.
+                if bool(sig.at[day, "atr_exit"]):
                     pending_exits.add(pos.ticker)
             elif pos.armed and pos.closes_below_ema >= rules.ema_exit_days:
                 pending_exits.add(pos.ticker)

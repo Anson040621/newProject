@@ -241,3 +241,15 @@ def test_atr_stop_buffer_and_rebuy_after_shakeout():
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert list(trades["entry_date"]) == [dates[2], dates[4]]
     assert list(trades["reentry"]) == [False, True]
+
+
+def test_close_below_line_still_sells_with_buffered_stop():
+    # EPAM, Sep 2022: the close falls below the ATR line but stays above the
+    # buffered intraday stop -> sell at the next open anyway.
+    closes = [100, 100, 100, 98, 95, 90]
+    exits = [False, False, False, True, False, False]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
+    sigs["AAA"]["atr_stop"] = [np.nan, np.nan, 99.0, 99.0, np.nan, np.nan]  # stop 3% below = 96.03
+    rules = basic_rules(cost=0.0, atr_exit_on_touch=True, atr_stop_buffer=0.03)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"] == f"{dates[4].date()} exit 150@95.00"
