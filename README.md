@@ -109,7 +109,7 @@ the portfolio day by day.
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
 | Exit before +8% | everything at the next open after the ATR trail flips to exit |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
-| Exit after +8% | the rest at the next open after a close below the 20 EMA (once price has closed above it) |
+| Exit after +8% | the rest at the next open after a close below the 20 EMA (once price has closed above it); `--ema-exit-days 3` waits for 3 closes in a row |
 | Costs | 0.1% per buy and per sell (`--cost`) |
 
 ```bash

@@ -10,7 +10,8 @@ Rules (defaults):
                       flips to exit.
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
           after +8%:  sell the rest at the next open after a close below the
-                      20 EMA, once price has closed above the 20 EMA since entry.
+                      20 EMA (or N consecutive closes, --ema-exit-days), once
+                      price has closed above the 20 EMA since entry.
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
 
 Prices are split-adjusted, not dividend-adjusted (like a TradingView chart);
@@ -34,6 +35,7 @@ class Rules:
     max_positions: int = 6
     take_profit: float = 0.08
     take_profit_fraction: float = 1 / 3
+    ema_exit_days: int = 1  # consecutive closes below the 20 EMA before selling the rest
     cost: float = 0.001
     capital: float = 100_000.0
 
@@ -48,6 +50,7 @@ class Position:
     sctr: float
     tp_taken: bool = False
     armed: bool = False  # has closed above the 20 EMA since entry
+    closes_below_ema: int = 0  # consecutive closes below the 20 EMA
     days_without_price: int = 0
     proceeds: float = 0.0  # cash received from sales so far (after costs)
     cost_basis: float = 0.0  # cash paid at entry (incl. costs)
@@ -158,10 +161,11 @@ def run(
                 continue
             pos.days_without_price = 0
             last_close[pos.ticker] = close
+            pos.closes_below_ema = pos.closes_below_ema + 1 if close < ema20 else 0
             if not pos.tp_taken:
                 if bool(sig.at[day, "atr_exit"]):
                     pending_exits.add(pos.ticker)
-            elif pos.armed and close < ema20:
+            elif pos.armed and pos.closes_below_ema >= rules.ema_exit_days:
                 pending_exits.add(pos.ticker)
             if close > ema20:
                 pos.armed = True

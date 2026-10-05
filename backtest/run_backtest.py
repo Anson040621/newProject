@@ -72,6 +72,8 @@ def main(argv=None):
     parser.add_argument("--top", type=int, default=defaults.top_n, help="only stocks in the daily top N")
     parser.add_argument("--min-sctr", type=float, default=defaults.min_sctr)
     parser.add_argument("--take-profit", type=float, default=defaults.take_profit, help="e.g. 0.08 = +8%%")
+    parser.add_argument("--ema-exit-days", type=int, default=defaults.ema_exit_days,
+                        help="consecutive closes below the 20 EMA before selling the rest (default 1)")
     parser.add_argument("--cost", type=float, default=defaults.cost, help="cost per buy/sell, e.g. 0.001 = 0.1%%")
     parser.add_argument("--trades-out", default="backtest_trades.csv")
     parser.add_argument("--equity-out", default="backtest_equity.csv")
@@ -79,7 +81,7 @@ def main(argv=None):
 
     rules = strategy.Rules(
         top_n=args.top, min_sctr=args.min_sctr, position_size=args.size, max_positions=args.max_positions,
-        take_profit=args.take_profit, cost=args.cost, capital=args.capital,
+        take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top)
     equity, trades = strategy.run(dates, prices, sigs, top, rules)

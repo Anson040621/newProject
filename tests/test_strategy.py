@@ -109,3 +109,13 @@ def test_ignores_atr_exit_after_take_profit_and_respects_max_positions():
     top = pd.concat([top.assign(ticker=f"T{i}", rank=i + 1, sctr=99.9 - i) for i in range(7)])
     _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0))
     assert sorted(trades["ticker"]) == [f"T{i}" for i in range(6)]
+
+
+def test_ema_exit_waits_for_consecutive_closes_below():
+    #        signal  entry  +8%  above  below below  above  below below below -> exit next open
+    closes = [100, 100, 100, 109, 112, 105, 105, 112, 105, 104, 103, 102]
+    ema = [101] * 3 + [110] * 9
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
+    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, ema_exit_days=3))
+    fills = trades.iloc[0]["exits"].split("; ")
+    assert fills[1].startswith(f"{dates[11].date()} exit 100@102.00")  # 3rd close below on day 10, sold day 11
