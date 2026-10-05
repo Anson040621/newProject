@@ -7,7 +7,8 @@ Rules (defaults):
   Size    15% of account equity per trade, at most 6 positions. When more
           signals than free slots appear, the highest SCTR goes first.
   Exit    before +8%: sell everything at the next open after the ATR trail
-                      flips to exit.
+                      flips to exit (or, with --atr-exit-on-touch, the moment
+                      the price touches the trail line during the day).
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
           after +8%:  sell the rest at the next open after a close below the
                       20 EMA (or N consecutive closes, --ema-exit-days), once
@@ -36,6 +37,7 @@ class Rules:
     take_profit: float = 0.08
     take_profit_fraction: float = 1 / 3
     ema_exit_days: int = 1  # consecutive closes below the 20 EMA before selling the rest
+    atr_exit_on_touch: bool = False  # before +8%: sell the moment price touches the ATR trail
     cost: float = 0.001
     capital: float = 100_000.0
 
@@ -135,7 +137,19 @@ def run(
             positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid)
         pending_entries = []
 
-        # 2. Intraday: take 1/3 profit when the high reaches +8%.
+        # 2a. Intraday ATR stop (optional): before +8%, sell everything the moment the
+        #     price touches yesterday's trail line (at the open if it gaps below).
+        if rules.atr_exit_on_touch:
+            for pos in list(positions.values()):
+                stop = signals[pos.ticker].at[day, "atr_stop"]
+                low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
+                if pos.tp_taken or pd.isna(stop) or low is None or low > stop:
+                    continue
+                fill = min(stop, open_) if open_ is not None and day != pos.entry_date else stop
+                sell(pos, pos.shares, fill, day, "atr-stop")
+                close_out(pos, day)
+
+        # 2b. Intraday: take 1/3 profit when the high reaches +8%.
         for pos in list(positions.values()):
             high, open_ = px(pos.ticker, day, "high"), px(pos.ticker, day, "open")
             target = pos.entry_price * (1 + rules.take_profit)
@@ -163,7 +177,7 @@ def run(
             last_close[pos.ticker] = close
             pos.closes_below_ema = pos.closes_below_ema + 1 if close < ema20 else 0
             if not pos.tp_taken:
-                if bool(sig.at[day, "atr_exit"]):
+                if not rules.atr_exit_on_touch and bool(sig.at[day, "atr_exit"]):
                     pending_exits.add(pos.ticker)
             elif pos.armed and pos.closes_below_ema >= rules.ema_exit_days:
                 pending_exits.add(pos.ticker)

@@ -76,6 +76,8 @@ def main(argv=None):
                         help="consecutive closes below the 20 EMA before selling the rest (default 1)")
     parser.add_argument("--no-squeeze", action="store_true",
                         help="drop the squeeze (blue cross) entry condition")
+    parser.add_argument("--atr-exit-on-touch", action="store_true",
+                        help="before +8%%: sell when the price touches the ATR trail, not at the next open after a close below it")
     parser.add_argument("--cost", type=float, default=defaults.cost, help="cost per buy/sell, e.g. 0.001 = 0.1%%")
     parser.add_argument("--trades-out", default="backtest_trades.csv")
     parser.add_argument("--equity-out", default="backtest_equity.csv")
@@ -84,6 +86,7 @@ def main(argv=None):
     rules = strategy.Rules(
         top_n=args.top, min_sctr=args.min_sctr, position_size=args.size, max_positions=args.max_positions,
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
+        atr_exit_on_touch=args.atr_exit_on_touch,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     equity, trades = strategy.run(dates, prices, sigs, top, rules)

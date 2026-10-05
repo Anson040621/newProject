@@ -132,6 +132,9 @@ def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_sq
     trail = atr_trail(high, low, close)
     out = sq.join(trail)
     out["ema20"] = ema(close)
+    # The up-trend trail line as of the previous close: a price touching it during
+    # the day is where the trend would flip (used for an intraday stop).
+    out["atr_stop"] = out["trail"].where(out["trend"] == 1).shift(1)
     out["entry_setup"] = (out["momentum"] < 0) & out["atr_buy"]
     if require_squeeze:
         out["entry_setup"] &= out["squeeze_on"]

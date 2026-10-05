@@ -107,7 +107,7 @@ the portfolio day by day.
 | Stocks | daily SCTR top 10 (`--top`), SCTR above 90 (`--min-sctr`) |
 | Entry | same day: squeeze on (blue crosses), momentum bar red, ATR trail flips to BUY; buy at the next open (`--no-squeeze` drops the squeeze condition) |
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
-| Exit before +8% | everything at the next open after the ATR trail flips to exit |
+| Exit before +8% | everything at the next open after the ATR trail flips to exit (`--atr-exit-on-touch`: the moment the price touches the trail line) |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
 | Exit after +8% | the rest at the next open after a close below the 20 EMA (once price has closed above it); `--ema-exit-days 3` waits for 3 closes in a row |
 | Costs | 0.1% per buy and per sell (`--cost`) |

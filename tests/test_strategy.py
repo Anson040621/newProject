@@ -63,6 +63,7 @@ def make_world(closes, entry_day, exit_flags=None, ema=None):
     sig["entry_setup"] = [i == entry_day for i in range(len(dates))]
     sig["atr_exit"] = exit_flags if exit_flags is not None else [False] * len(dates)
     sig["ema20"] = ema if ema is not None else close * 0.9
+    sig["atr_stop"] = np.nan
     top = pd.DataFrame({"date": dates, "rank": 1, "ticker": "AAA", "sctr": 99.9, "score": 50.0})
     return dates, prices, {"AAA": sig}, top
 
@@ -129,3 +130,27 @@ def test_entry_without_squeeze_requirement():
     expected = (loose["momentum"] < 0) & loose["atr_buy"]
     assert (loose["entry_setup"] == expected).all()
     assert (strict["entry_setup"] == expected & strict["squeeze_on"]).all()
+
+
+def test_atr_stop_on_touch_sells_intraday():
+    closes = [100, 100, 100, 99, 99, 99]
+    dates, prices, sigs, top = make_world(closes, entry_day=1)
+    sigs["AAA"]["atr_stop"] = [np.nan, np.nan, 95.0, 98.5, 98.5, 98.5]  # day 3 low (98.01) touches 98.5
+    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, atr_exit_on_touch=True))
+    trade = trades.iloc[0]
+    assert trade["exit_date"] == dates[3]
+    assert trade["exits"] == f"{dates[3].date()} atr-stop 150@98.50"
+    # A gap below the line fills at the open instead.
+    prices["AAA"].loc[dates[3], ["open", "low"]] = [97.0, 96.0]
+    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, atr_exit_on_touch=True))
+    assert trades.iloc[0]["exits"].endswith("atr-stop 150@97.00")
+
+
+def test_ema_exit_never_applies_before_take_profit():
+    # Price closes above the EMA, then below it for days, but never reaches +8%:
+    # with the intraday ATR stop mode only the ATR stop may close the trade.
+    closes = [100, 100, 100, 102, 99, 98, 97, 96]
+    ema = [101, 101, 99, 99, 101, 101, 101, 101]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
+    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, atr_exit_on_touch=True))
+    assert "open at end" in trades.iloc[0]["exits"]
