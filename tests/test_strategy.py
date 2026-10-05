@@ -206,3 +206,20 @@ def test_entry_on_touch_buys_at_flip_level():
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True))
     trade = trades.iloc[0]
     assert trade["entry_date"] == dates[2] and trade["entry_price"] == 100.5  # day 2 high 101 touches 100.5
+
+
+def test_idle_money_parked_in_etf():
+    closes = [100.0] * 6
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)  # never trades
+    park = pd.DataFrame({"open": [10, 10.5, 11, 11, 12, 12], "close": [10, 11, 11, 12, 12, 13]}, index=dates, dtype=float)
+    equity, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, park_cost=0.0), park=park)
+    assert trades.empty
+    assert equity.iloc[-1] == pytest.approx(100_000 * 13 / 10)  # fully in the ETF the whole time
+
+    # Buying a stock takes the money out of the ETF; it stops earning the ETF's return.
+    dates, prices, sigs, top = make_world([100.0] * 6, entry_day=1)
+    equity, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, park_cost=0.0), park=park)
+    # Day 2: the ETF opens at 11 (account $110,000), buy 15% = 165 shares at 100.
+    in_etf_after_buy = 100_000 * 11 / 10 - 165 * 100
+    assert trades.iloc[0]["shares"] == 165
+    assert equity.iloc[-1] == pytest.approx(in_etf_after_buy * 13 / 11 + 165 * 100)

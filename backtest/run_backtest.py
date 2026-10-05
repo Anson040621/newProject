@@ -17,21 +17,28 @@ from .pick_stocks import build_inputs
 from .prices import load_ohlc
 from .universe import DATA_DIR
 
-BENCHMARK_FILE = DATA_DIR / "benchmark" / "SPY.csv"
 
 
-def load_benchmark(start, refresh: bool = False) -> pd.Series:
-    """SPY closes adjusted for dividends (total return), downloaded once."""
-    if refresh or not BENCHMARK_FILE.exists():
+def load_etf(symbol: str, refresh: bool = False) -> pd.DataFrame:
+    """Daily open and close of an ETF, adjusted for dividends (total return), downloaded once."""
+    path = DATA_DIR / "benchmark" / f"{symbol}.csv"
+    if not refresh and path.exists():
+        data = pd.read_csv(path, index_col=0, parse_dates=True)
+    if refresh or not path.exists() or "Open" not in data.columns:
         import yfinance as yf
 
-        data = yf.download("SPY", start="2010-01-01", auto_adjust=False, progress=False)
+        data = yf.download(symbol, start="2010-01-01", auto_adjust=False, progress=False)
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-        BENCHMARK_FILE.parent.mkdir(parents=True, exist_ok=True)
-        data[["Close", "Adj Close"]].to_csv(BENCHMARK_FILE)
-    spy = pd.read_csv(BENCHMARK_FILE, index_col=0, parse_dates=True)["Adj Close"]
-    return spy.loc[start:]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data[["Open", "Close", "Adj Close"]].to_csv(path)
+    factor = data["Adj Close"] / data["Close"]
+    return pd.DataFrame({"open": data["Open"] * factor, "close": data["Adj Close"]})
+
+
+def load_benchmark(start, symbol: str = "SPY") -> pd.Series:
+    """Total-return closes of the benchmark ETF from `start`."""
+    return load_etf(symbol)["close"].loc[start:]
 
 
 def prepare(start, end, top_n: int = 10, require_squeeze: bool = True):
@@ -85,6 +92,10 @@ def main(argv=None):
                         help="sell everything at this loss from entry, e.g. 0.09 = -9%% (default off)")
     parser.add_argument("--reentry-days", type=int, default=defaults.reentry_days,
                         help="re-buy if the ATR flips back to BUY within N days of an early exit (default 5, 0 = off)")
+    parser.add_argument("--park", default=None, metavar="ETF",
+                        help="keep all money not in a trade in this ETF, e.g. QQQ (default: cash)")
+    parser.add_argument("--park-cost", type=float, default=defaults.park_cost,
+                        help="cost per move in/out of the parking ETF (default 0.0005 = 0.05%%)")
     parser.add_argument("--cost", type=float, default=defaults.cost, help="cost per buy/sell, e.g. 0.001 = 0.1%%")
     parser.add_argument("--trades-out", default="backtest_trades.csv")
     parser.add_argument("--equity-out", default="backtest_equity.csv")
@@ -94,10 +105,11 @@ def main(argv=None):
         top_n=args.top, min_sctr=args.min_sctr, position_size=args.size, max_positions=args.max_positions,
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
-        emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
+        emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
-    equity, trades = strategy.run(dates, prices, sigs, top, rules)
+    park = load_etf(args.park).reindex(dates).ffill() if args.park else None
+    equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park)
     spy = load_benchmark(args.start)
 
     stats = strategy.summary(equity, trades, spy)

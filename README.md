@@ -115,11 +115,16 @@ The defaults are the chosen rule set ("version G"):
 | Exit after +8% | the rest at the next open after 3 closes in a row below the 20 EMA (`--ema-exit-days`), once price has closed above it |
 | Re-entry | after an exit before +8%, buy again if the ATR flips back to BUY within 5 trading days (`--reentry-days`, 0 = off) |
 | Costs | 0.1% per buy and per sell (`--cost`) |
-| Other options | `--atr-exit-on-touch` (intraday ATR stop before +8%), `--emergency-stop 0.09` (sell at -9% from entry) |
+| Other options | `--atr-exit-on-touch` (intraday ATR stop before +8%), `--emergency-stop 0.09` (sell at -9% from entry), `--park QQQ` (keep all money not in a trade in QQQ; 0.05% per move, `--park-cost`) |
 
 2015-01-02 to 2026-10-02: $100k -> $254k (8.3% a year, worst drawdown -36%,
 344 trades, 45% winners) vs SPY 13.8% a year. Most of the gain came in 2020
 (+80%); excluding 2020 the strategy returned about 3% a year.
+
+With idle money parked in QQQ (`--park QQQ`): $100k -> $728k (18.5% a year,
+worst drawdown -42%) vs holding QQQ alone $100k -> $794k (19.3%, -35%). The
+trades earned about the same as QQQ over the days they were held (2.2% vs 2.3%
+on average).
 
 ```bash
 python -m backtest.run_backtest --start 2015-01-01

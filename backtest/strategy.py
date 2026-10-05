@@ -48,6 +48,7 @@ class Rules:
     entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
     emergency_stop: float = 0.0  # e.g. 0.09: sell everything at -9% from entry (0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
+    park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
     cost: float = 0.001
     capital: float = 100_000.0
 
@@ -77,12 +78,19 @@ def run(
     signals: dict[str, pd.DataFrame],
     top: pd.DataFrame,
     rules: Rules = Rules(),
+    park: pd.DataFrame | None = None,
 ) -> tuple[pd.Series, pd.DataFrame]:
     """Simulate the strategy.
 
     prices:  ticker -> DataFrame(open, high, low, close) on the full trading calendar
     signals: ticker -> output of signals.ticker_signals on the same calendar
     top:     daily top-N table (date, rank, ticker, sctr)
+    park:    optional DataFrame(open, close) of a total-return ETF (e.g. QQQ) on the
+             same calendar. All money not in a trade is held in it: buying a stock
+             sells the ETF, selling a stock buys it back (rules.park_cost per move).
+             Moves during the day happen at the day's ETF open-to-close average return
+             (we only have daily data), i.e. the idle balance earns overnight and
+             open-to-close returns.
     Returns the daily equity curve and the trade log.
     """
     top = top[(top["rank"] <= rules.top_n) & (top["sctr"] > rules.min_sctr)]
@@ -105,7 +113,7 @@ def run(
     def sell(pos: Position, shares: int, price: float, day, reason: str):
         nonlocal cash
         value = shares * price
-        cash += value * (1 - rules.cost)
+        cash += value * (1 - rules.cost) * (1 - park_cost)
         pos.proceeds += value * (1 - rules.cost)
         pos.shares -= shares
         pos.fills.append((day, reason, shares, price))
@@ -134,17 +142,26 @@ def run(
         if len(positions) >= rules.max_positions or ticker in positions:
             return False
         shares = math.floor(rules.position_size * prev_equity / (price * (1 + rules.cost)))
-        if shares <= 0 or shares * price * (1 + rules.cost) > cash:
+        if shares <= 0 or shares * price * (1 + rules.cost) * (1 + park_cost) > cash:
             return False
         paid = shares * price * (1 + rules.cost)
-        cash -= paid
+        cash -= paid * (1 + park_cost)
         positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid,
                                      intraday_entry=intraday, reentry=reentry)
         early_exits.pop(ticker, None)
         return True
 
+    park_cost = rules.park_cost if park is not None else 0.0
+    if park is not None:
+        cash *= 1 - park_cost  # initial purchase of the parking ETF
+        park_open, park_close = park["open"].to_numpy(dtype=float), park["close"].to_numpy(dtype=float)
+
     prev_equity = cash
     for day_number, day in enumerate(dates):
+        # 0. Idle money in the parking ETF earns its overnight return (yesterday's close -> today's open).
+        if park is not None and day_number > 0 and park_open[day_number] > 0 and park_close[day_number - 1] > 0:
+            cash *= park_open[day_number] / park_close[day_number - 1]
+
         # 1. Orders from yesterday's close are filled at today's open.
         for ticker in sorted(pending_exits):
             pos = positions.get(ticker)
@@ -206,6 +223,11 @@ def run(
                 pos.tp_taken = True
                 if pos.shares == 0:
                     close_out(pos, day)
+
+        # 2c. The parking ETF's open -> close return on whatever is still idle at the close
+        #     (cash from intraday trades counts as idle for the whole day).
+        if park is not None and park_open[day_number] > 0:
+            cash *= park_close[day_number] / park_open[day_number]
 
         # 3. At the close: exit signals for open positions.
         for pos in list(positions.values()):
