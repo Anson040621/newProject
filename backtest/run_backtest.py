@@ -48,7 +48,7 @@ def prepare(start, end, top_n: int = 10, require_squeeze: bool = True):
         sigs[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze).reindex(dates)
         prices[ticker] = frame.reindex(dates)
     for frame in sigs.values():
-        for col in ("entry_setup", "atr_exit"):
+        for col in ("setup", "entry_setup", "atr_buy", "atr_exit"):
             frame[col] = frame[col].fillna(False).astype(bool)
     return dates, prices, sigs, top
 
@@ -78,6 +78,12 @@ def main(argv=None):
                         help="drop the squeeze (blue cross) entry condition")
     parser.add_argument("--atr-exit-on-touch", action="store_true",
                         help="before +8%%: sell when the price touches the ATR trail, not at the next open after a close below it")
+    parser.add_argument("--entry-on-touch", action="store_true",
+                        help="buy intraday when the price touches the ATR flip level (instead of the next open)")
+    parser.add_argument("--emergency-stop", type=float, default=0.0,
+                        help="sell everything at this loss from entry, e.g. 0.09 = -9%% (default off)")
+    parser.add_argument("--reentry-days", type=int, default=0,
+                        help="re-buy if the ATR flips back to BUY within N days of an early exit (default off)")
     parser.add_argument("--cost", type=float, default=defaults.cost, help="cost per buy/sell, e.g. 0.001 = 0.1%%")
     parser.add_argument("--trades-out", default="backtest_trades.csv")
     parser.add_argument("--equity-out", default="backtest_equity.csv")
@@ -86,7 +92,8 @@ def main(argv=None):
     rules = strategy.Rules(
         top_n=args.top, min_sctr=args.min_sctr, position_size=args.size, max_positions=args.max_positions,
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
-        atr_exit_on_touch=args.atr_exit_on_touch,
+        atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
+        emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     equity, trades = strategy.run(dates, prices, sigs, top, rules)

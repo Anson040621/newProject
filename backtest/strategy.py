@@ -15,6 +15,16 @@ Rules (defaults):
                       price has closed above the 20 EMA since entry.
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
 
+Optional rules (off by default):
+  --entry-on-touch     buy during the day the moment the price touches the ATR
+                       flip level (yesterday's trail line), if yesterday the stock
+                       was in the top 10 with the squeeze on and a red bar.
+  --emergency-stop X   sell everything the moment the price is X below the entry
+                       (e.g. 0.09 = -9%), at any time.
+  --reentry-days N     after an exit before +8% (ATR exit or emergency stop), buy
+                       again if the ATR trail flips back to BUY within N trading
+                       days (no other conditions).
+
 Prices are split-adjusted, not dividend-adjusted (like a TradingView chart);
 dividends received are ignored.
 """
@@ -38,6 +48,9 @@ class Rules:
     take_profit_fraction: float = 1 / 3
     ema_exit_days: int = 1  # consecutive closes below the 20 EMA before selling the rest
     atr_exit_on_touch: bool = False  # before +8%: sell the moment price touches the ATR trail
+    entry_on_touch: bool = False  # buy intraday when price touches the ATR flip level
+    emergency_stop: float = 0.0  # e.g. 0.09: sell everything at -9% from entry (0 = off)
+    reentry_days: int = 0  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     cost: float = 0.001
     capital: float = 100_000.0
 
@@ -54,6 +67,8 @@ class Position:
     armed: bool = False  # has closed above the 20 EMA since entry
     closes_below_ema: int = 0  # consecutive closes below the 20 EMA
     days_without_price: int = 0
+    intraday_entry: bool = False
+    reentry: bool = False
     proceeds: float = 0.0  # cash received from sales so far (after costs)
     cost_basis: float = 0.0  # cash paid at entry (incl. costs)
     fills: list = field(default_factory=list)
@@ -79,7 +94,9 @@ def run(
     cash = rules.capital
     positions: dict[str, Position] = {}
     pending_exits: set[str] = set()
-    pending_entries: list[tuple[str, float]] = []
+    pending_entries: list[tuple[str, float, bool]] = []  # (ticker, sctr, is re-entry), filled at the open
+    touch_orders: list[tuple[str, float, bool]] = []  # buy-stop orders at the ATR flip level, for today
+    early_exits: dict[str, tuple[int, float]] = {}  # ticker -> (day number of an exit before +8%, sctr)
     last_close: dict[str, float] = {}
     equity = pd.Series(np.nan, index=dates)
     trades = []
@@ -103,6 +120,7 @@ def run(
             "entry_price": pos.entry_price,
             "shares": pos.initial_shares,
             "sctr_at_signal": pos.sctr,
+            "reentry": pos.reentry,
             "exit_date": day,
             "exits": "; ".join(f"{d.date()} {r} {s}@{p:.2f}" for d, r, s, p in pos.fills),
             "took_profit": pos.tp_taken,
@@ -111,9 +129,25 @@ def run(
             "days_held": (day - pos.entry_date).days,
         })
         del positions[pos.ticker]
+        if not pos.tp_taken and rules.reentry_days:
+            early_exits[pos.ticker] = (day_number, pos.sctr)
+
+    def buy(ticker, price, day, sctr, reentry, intraday) -> bool:
+        nonlocal cash
+        if len(positions) >= rules.max_positions or ticker in positions:
+            return False
+        shares = math.floor(rules.position_size * prev_equity / (price * (1 + rules.cost)))
+        if shares <= 0 or shares * price * (1 + rules.cost) > cash:
+            return False
+        paid = shares * price * (1 + rules.cost)
+        cash -= paid
+        positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid,
+                                     intraday_entry=intraday, reentry=reentry)
+        early_exits.pop(ticker, None)
+        return True
 
     prev_equity = cash
-    for day in dates:
+    for day_number, day in enumerate(dates):
         # 1. Orders from yesterday's close are filled at today's open.
         for ticker in sorted(pending_exits):
             pos = positions.get(ticker)
@@ -123,19 +157,34 @@ def run(
                 close_out(pos, day)
         pending_exits.clear()
 
-        for ticker, sctr in pending_entries:
-            if len(positions) >= rules.max_positions or ticker in positions:
-                continue
+        for ticker, sctr, reentry in pending_entries:
             price = px(ticker, day, "open") or px(ticker, day, "close")
-            if price is None:
-                continue
-            shares = math.floor(rules.position_size * prev_equity / (price * (1 + rules.cost)))
-            if shares <= 0 or shares * price * (1 + rules.cost) > cash:
-                continue
-            paid = shares * price * (1 + rules.cost)
-            cash -= paid
-            positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid)
+            if price is not None:
+                buy(ticker, price, day, sctr, reentry, intraday=False)
         pending_entries = []
+
+        # 1b. Buy-stop orders at the ATR flip level (--entry-on-touch): filled when the
+        #     high reaches yesterday's trail line, at the open if it gaps above.
+        for ticker, sctr, reentry in touch_orders:
+            level = signals[ticker].at[day, "flip_level"]
+            high, open_ = px(ticker, day, "high"), px(ticker, day, "open")
+            if pd.isna(level) or high is None or high < level:
+                continue
+            buy(ticker, max(level, open_) if open_ is not None else level, day, sctr, reentry, intraday=True)
+        touch_orders = []
+
+        # 2. Emergency stop: sell everything at -X% from the entry (at the open if it gaps below).
+        if rules.emergency_stop:
+            for pos in list(positions.values()):
+                if pos.intraday_entry and pos.entry_date == day:
+                    continue  # bought during the day: we can't tell whether the low came first
+                stop = pos.entry_price * (1 - rules.emergency_stop)
+                low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
+                if low is None or low > stop:
+                    continue
+                fill = min(stop, open_) if open_ is not None and day != pos.entry_date else stop
+                sell(pos, pos.shares, fill, day, "emergency-stop")
+                close_out(pos, day)
 
         # 2a. Intraday ATR stop (optional): before +8%, sell everything the moment the
         #     price touches yesterday's trail line (at the open if it gaps below).
@@ -186,11 +235,37 @@ def run(
 
         # 4. At the close: new entry signals among today's top 10.
         today = top_by_day.get(day)
+        candidates = []
         if today is not None:
             for row in today.itertuples():
                 sig = signals.get(row.ticker)
-                if sig is not None and row.ticker not in positions and bool(sig.at[day, "entry_setup"]):
-                    pending_entries.append((row.ticker, row.sctr))
+                if sig is None or row.ticker in positions:
+                    continue
+                if not rules.entry_on_touch and bool(sig.at[day, "entry_setup"]):
+                    candidates.append((row.ticker, row.sctr, False))
+                elif rules.entry_on_touch and bool(sig.at[day, "setup"]) and sig.at[day, "trend"] != 1:
+                    candidates.append((row.ticker, row.sctr, False))  # order for tomorrow at the flip level
+
+        # 5. Re-entry after an early exit: the ATR trail flips back to BUY within N days.
+        for ticker, (exit_day, sctr) in list(early_exits.items()):
+            sig = signals[ticker]
+            if ticker in positions:
+                continue
+            if rules.entry_on_touch:
+                if day_number + 1 - exit_day > rules.reentry_days:
+                    del early_exits[ticker]
+                elif sig.at[day, "trend"] != 1:
+                    candidates.insert(0, (ticker, sctr, True))
+            elif day_number - exit_day > rules.reentry_days:
+                del early_exits[ticker]
+            elif bool(sig.at[day, "atr_buy"]):
+                candidates.insert(0, (ticker, sctr, True))
+
+        seen = set()
+        for order in candidates:
+            if order[0] not in seen:
+                seen.add(order[0])
+                (touch_orders if rules.entry_on_touch else pending_entries).append(order)
 
         prev_equity = cash + sum(p.shares * last_close.get(p.ticker, p.entry_price) for p in positions.values())
         equity[day] = prev_equity

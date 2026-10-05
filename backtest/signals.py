@@ -135,7 +135,11 @@ def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_sq
     # The up-trend trail line as of the previous close: a price touching it during
     # the day is where the trend would flip (used for an intraday stop).
     out["atr_stop"] = out["trail"].where(out["trend"] == 1).shift(1)
-    out["entry_setup"] = (out["momentum"] < 0) & out["atr_buy"]
+    # The down-trend trail line as of the previous close: a price touching it
+    # during the day is where the trend would flip to BUY (intraday entry).
+    out["flip_level"] = out["trail"].where(out["trend"] != 1).shift(1)
+    out["setup"] = out["momentum"] < 0  # red momentum bar (and the squeeze, below)
     if require_squeeze:
-        out["entry_setup"] &= out["squeeze_on"]
+        out["setup"] &= out["squeeze_on"]
+    out["entry_setup"] = out["setup"] & out["atr_buy"]
     return out

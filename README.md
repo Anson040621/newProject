@@ -111,6 +111,7 @@ the portfolio day by day.
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
 | Exit after +8% | the rest at the next open after a close below the 20 EMA (once price has closed above it); `--ema-exit-days 3` waits for 3 closes in a row |
 | Costs | 0.1% per buy and per sell (`--cost`) |
+| Optional | `--entry-on-touch`: buy intraday when the price touches the ATR flip level (yesterday's setup); `--emergency-stop 0.09`: sell at -9% from entry; `--reentry-days 5`: re-buy if the ATR flips back to BUY within 5 days of an exit before +8% |
 
 ```bash
 python -m backtest.run_backtest --start 2015-01-01

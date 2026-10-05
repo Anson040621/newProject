@@ -64,6 +64,10 @@ def make_world(closes, entry_day, exit_flags=None, ema=None):
     sig["atr_exit"] = exit_flags if exit_flags is not None else [False] * len(dates)
     sig["ema20"] = ema if ema is not None else close * 0.9
     sig["atr_stop"] = np.nan
+    sig["setup"] = sig["entry_setup"]
+    sig["atr_buy"] = sig["entry_setup"]
+    sig["trend"] = 1
+    sig["flip_level"] = np.nan
     top = pd.DataFrame({"date": dates, "rank": 1, "ticker": "AAA", "sctr": 99.9, "score": 50.0})
     return dates, prices, {"AAA": sig}, top
 
@@ -154,3 +158,38 @@ def test_ema_exit_never_applies_before_take_profit():
     dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
     _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, atr_exit_on_touch=True))
     assert "open at end" in trades.iloc[0]["exits"]
+
+
+def test_emergency_stop_sells_at_minus_9_percent():
+    closes = [100, 100, 100, 95, 93, 93]
+    dates, prices, sigs, top = make_world(closes, entry_day=1)
+    prices["AAA"].loc[dates[4], "low"] = 90.0  # touches 100 x 0.91 = 91 during the day
+    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, emergency_stop=0.09))
+    assert trades.iloc[0]["exits"] == f"{dates[4].date()} emergency-stop 150@91.00"
+
+
+def test_reentry_when_atr_flips_back_within_window():
+    closes = [100, 100, 100, 97, 96, 99, 101, 102, 103, 104]
+    exits = [False, False, False, True, False, False, False, False, False, False]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
+    sigs["AAA"]["atr_buy"] = [False] * 6 + [True] + [False] * 3  # flips back on day 6
+    rules = strategy.Rules(cost=0.0, reentry_days=5)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert list(trades["entry_date"]) == [dates[2], dates[7]]  # exit day 4, flip day 6 -> buy day 7
+    assert list(trades["reentry"]) == [False, True]
+    # The same flip outside the window is ignored.
+    sigs["AAA"]["atr_buy"] = [False] * 9 + [True]
+    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, reentry_days=3))
+    assert len(trades) == 1
+
+
+def test_entry_on_touch_buys_at_flip_level():
+    closes = [100, 100, 100, 104, 105, 106]
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["setup"] = [False, True, False, False, False, False]  # squeeze + red bar on day 1
+    sig["trend"] = [-1, -1, 1, 1, 1, 1]
+    sig["flip_level"] = [np.nan, np.nan, 100.5, np.nan, np.nan, np.nan]  # day 1's down-trend trail
+    _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, entry_on_touch=True))
+    trade = trades.iloc[0]
+    assert trade["entry_date"] == dates[2] and trade["entry_price"] == 100.5  # day 2 high 101 touches 100.5
