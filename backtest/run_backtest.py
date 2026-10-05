@@ -90,6 +90,8 @@ def main(argv=None):
                         help="with the intraday stop: also sell at the next open after a close below the line (default off)")
     parser.add_argument("--sticky-stop", action=argparse.BooleanOptionalAction, default=defaults.sticky_stop,
                         help="keep the last stop when the green line disappears, never lower it (default on)")
+    parser.add_argument("--breakeven-exit", action=argparse.BooleanOptionalAction, default=defaults.breakeven_exit,
+                        help="after +8%%: sell the rest at the next open after a close at or below the entry (default on)")
     parser.add_argument("--entry-buffer", type=float, default=defaults.entry_buffer,
                         help="buy-stop this far above the ATR flip level, e.g. 0.02 = 2%% (default)")
     parser.add_argument("--atr-stop-buffer", type=float, default=defaults.atr_stop_buffer,
@@ -118,7 +120,7 @@ def main(argv=None):
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
-        close_exit=args.close_exit, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
+        close_exit=args.close_exit, breakeven_exit=args.breakeven_exit, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None

@@ -57,17 +57,19 @@ def test_atr_trail_flips():
 def basic_rules(**overrides):
     """Next-open entries, 1-day EMA exit, no re-entry; each test switches on what it checks."""
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
-                    atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0)
+                    atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
+                    breakeven_exit=False)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_13():
+def test_default_rules_are_version_16():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
     assert (rules.atr_exit_on_touch, rules.atr_stop_buffer, rules.close_exit) == (True, 0.05, True)
     assert not rules.sticky_stop and rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
+    assert rules.breakeven_exit
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
@@ -319,3 +321,15 @@ def test_hard_stop_on_intraday_entry_day_needs_a_close_below():
     prices["AAA"].loc[dates[1], "close"] = 86.0
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert trades.iloc[0]["exits"] == f"{dates[1].date()} emergency-stop 150@88.00"
+
+
+def test_breakeven_exit_after_take_profit():
+    # MAAS-like: +8% hit, the price never closes above the 20 EMA, then falls back to the entry.
+    closes = [100, 100, 100, 109, 104, 99.5, 90, 80]
+    ema = [101, 101, 101, 112, 112, 112, 112, 112]  # never closes above it -> the EMA exit never arms
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, breakeven_exit=True))
+    fills = trades.iloc[0]["exits"].split("; ")
+    assert fills[1] == f"{dates[6].date()} exit 100@90.00"  # close 99.5 <= 100 on day 5 -> next open
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
+    assert "open at end" in trades.iloc[0]["exits"]  # without it: held all the way down

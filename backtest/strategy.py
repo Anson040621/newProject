@@ -1,6 +1,6 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #13):
+Rules (defaults = version #16 = #13 + break-even exit):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
   Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
           crosses), the momentum bar is red and the 2x ATR trail is in a
@@ -17,7 +17,8 @@ Rules (defaults = version #13):
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
           after +8%:  sell the rest at the next open after 3 closes in a row
                       below the 20 EMA, once price has closed above the 20 EMA
-                      since entry.
+                      since entry, or after a close at or below the entry price
+                      (break-even exit, --no-breakeven-exit to turn off).
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days of the exit: buy-stop at the flip level (no other
           conditions).
@@ -60,6 +61,7 @@ class Rules:
     sticky_stop: bool = False  # keep the last stop when the green line disappears; never lower it
     close_exit: bool = True  # before +8%: also sell at the next open after a close below the line
     entry_buffer: float = 0.0  # buy-stop this far above the ATR flip level (entries and re-entries)
+    breakeven_exit: bool = True  # after +8%: sell the rest at the next open after a close at/below the entry
     rebuy_shakeouts: bool = False  # after an intraday ATR stop, buy back at the next open if the trend is still up
     cost: float = 0.001
     capital: float = 100_000.0
@@ -272,6 +274,8 @@ def run(
                     pending_exits.add(pos.ticker)
             elif pos.armed and pos.closes_below_ema >= rules.ema_exit_days:
                 pending_exits.add(pos.ticker)
+            elif rules.breakeven_exit and close <= pos.entry_price:
+                pending_exits.add(pos.ticker)  # gave back the whole gain: get out at break-even
             if close > ema20:
                 pos.armed = True
 
