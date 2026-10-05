@@ -1,6 +1,6 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #14):
+Rules (defaults = version #15):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
   Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
           crosses), the momentum bar is red and the 2x ATR trail is in a
@@ -18,6 +18,9 @@ Rules (defaults = version #14):
           after +8%:  sell the rest at the next open after 3 closes in a row
                       below the 20 EMA, once price has closed above the 20 EMA
                       since entry.
+  Hard    sell everything the moment the price is 12% below the entry (at the open
+  stop    if it gaps below), at any time, also after +8%. On the day of an
+          intraday entry it counts only if the close is below the stop.
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days: buy-stop 2% above the flip level (no other conditions).
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
@@ -25,7 +28,8 @@ Rules (defaults = version #14):
 Other options: --entry-buffer (default 0.02), --atr-stop-buffer (default 0.03),
 --close-exit (also sell at the next open after a close below the line),
 --no-sticky-stop (no stop while the green line is missing), --no-atr-exit-on-touch
-(version G: close-based exit only), --rebuy-shakeouts, --emergency-stop X,
+(version G: close-based exit only), --rebuy-shakeouts, --emergency-stop X (default
+0.12, 0 = off),
 --no-entry-on-touch, --reentry-days N, --ema-exit-days N.
 
 Prices are split-adjusted, not dividend-adjusted (like a TradingView chart);
@@ -52,7 +56,7 @@ class Rules:
     ema_exit_days: int = 3  # consecutive closes below the 20 EMA before selling the rest
     atr_exit_on_touch: bool = True  # before +8%: sell the moment price touches the ATR stop (see buffer)
     entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
-    emergency_stop: float = 0.0  # e.g. 0.09: sell everything at -9% from entry (0 = off)
+    emergency_stop: float = 0.12  # hard stop: sell everything at -12% from entry, any time (0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
     atr_stop_buffer: float = 0.03  # with atr_exit_on_touch: stop this far below the trail line (0.03 = 3%)
@@ -199,13 +203,15 @@ def run(
             buy(ticker, max(level, open_) if open_ is not None else level, day, sctr, reentry, intraday=True)
         touch_orders = []
 
-        # 2. Emergency stop: sell everything at -X% from the entry (at the open if it gaps below).
+        # 2. Hard stop: sell everything at -X% from the entry (at the open if it gaps below).
         if rules.emergency_stop:
             for pos in list(positions.values()):
-                if pos.intraday_entry and pos.entry_date == day:
-                    continue  # bought during the day: we can't tell whether the low came first
                 stop = pos.entry_price * (1 - rules.emergency_stop)
                 low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
+                if pos.intraday_entry and pos.entry_date == day:
+                    # Bought during the day: the low may have come before the purchase. Only a
+                    # close below the stop proves the price fell through it after we bought.
+                    low = px(pos.ticker, day, "close")
                 if low is None or low > stop:
                     continue
                 fill = min(stop, open_) if open_ is not None and day != pos.entry_date else stop

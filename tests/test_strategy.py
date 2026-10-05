@@ -57,17 +57,17 @@ def test_atr_trail_flips():
 def basic_rules(**overrides):
     """Next-open entries, 1-day EMA exit, no re-entry; each test switches on what it checks."""
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
-                    atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0)
+                    atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_14():
+def test_default_rules_are_version_15():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.02, 3, 5)
     assert (rules.atr_exit_on_touch, rules.atr_stop_buffer, rules.sticky_stop, rules.close_exit) == (True, 0.03, True, False)
-    assert rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
+    assert rules.emergency_stop == 0.12 and not rules.rebuy_shakeouts
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
     """One ticker with a flat open = close, highs 1% above the close."""
@@ -299,3 +299,22 @@ def test_entry_buffer_above_flip_level():
     sig["flip_level"] = [np.nan, np.nan, 99.5, np.nan, np.nan, np.nan]  # 2% above = 101.49 > high 101: no fill
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True, entry_buffer=0.02))
     assert trades.empty
+
+
+def test_hard_stop_on_intraday_entry_day_needs_a_close_below():
+    closes = [100, 100, 85, 85, 85]
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["setup"] = [True, False, False, False, False]
+    sig["trend"] = [-1, 1, 1, 1, 1]
+    sig["flip_level"] = [np.nan, 99.0, np.nan, np.nan, np.nan]
+    # Day 1: opens at 100, above the 99 level -> bought at the open; the close (100) is above
+    # the 12% stop (88) -> kept, although the day's low (80) is below it.
+    prices["AAA"].loc[dates[1], "low"] = 80.0  # this low may have come before the purchase
+    rules = basic_rules(cost=0.0, entry_on_touch=True, emergency_stop=0.12)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"] == f"{dates[2].date()} emergency-stop 150@85.00"  # day 2 gaps below: at the open
+    # Same day crash below the stop at the close -> stopped on the entry day at the stop price.
+    prices["AAA"].loc[dates[1], "close"] = 86.0
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"] == f"{dates[1].date()} emergency-stop 150@88.00"

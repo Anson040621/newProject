@@ -99,8 +99,8 @@ def main(argv=None):
     parser.add_argument("--entry-on-touch", action=argparse.BooleanOptionalAction, default=defaults.entry_on_touch,
                         help="buy intraday when the price touches the ATR flip level (default on); "
                              "--no-entry-on-touch buys at the next open after a close-based flip")
-    parser.add_argument("--emergency-stop", type=float, default=0.0,
-                        help="sell everything at this loss from entry, e.g. 0.09 = -9%% (default off)")
+    parser.add_argument("--emergency-stop", type=float, default=defaults.emergency_stop,
+                        help="hard stop: sell everything at this loss from entry, e.g. 0.12 = -12%% (default; 0 = off)")
     parser.add_argument("--reentry-days", type=int, default=defaults.reentry_days,
                         help="re-buy if the ATR flips back to BUY within N days of an early exit (default 5, 0 = off)")
     parser.add_argument("--park", default=None, metavar="ETF",

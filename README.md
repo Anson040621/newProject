@@ -102,7 +102,7 @@ folder.
 from "SEPA", and the "2x ATR Trailing Exit"); `backtest/strategy.py` simulates
 the portfolio day by day.
 
-The defaults are the current rule set ("version #14"):
+The defaults are the current rule set ("version #15"):
 
 | Rule | Default |
 |---|---|
@@ -113,12 +113,13 @@ The defaults are the current rule set ("version #14"):
 | Exit before +8% | sell everything the moment the price touches 3% below the previous close's green ATR line (`--atr-stop-buffer`), at the open if it gaps below; the stop keeps its last level when the line disappears and never moves down (`--no-sticky-stop` to turn off); no sale on a close below the line (`--close-exit` to add it) |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
 | Exit after +8% | the rest at the next open after 3 closes in a row below the 20 EMA (`--ema-exit-days`), once price has closed above it |
+| Hard stop | sell everything 12% below the entry at any time, also after +8% (`--emergency-stop`, 0 = off); on an intraday entry day only a close below it counts |
 | Re-entry | after an exit before +8%, if the ATR flips back to BUY within 5 trading days, buy-stop 2% above the flip level (`--reentry-days`, 0 = off) |
 | Costs | 0.1% per buy and per sell (`--cost`) |
 | Other options | `--no-atr-exit-on-touch` (version G: sell at the next open after a close below the line), `--emergency-stop 0.09`, `--park QQQ`, `--rebuy-shakeouts` |
 
-Earlier versions for comparison: version G = `--no-atr-exit-on-touch --entry-buffer 0`;
-version #13 = `--close-exit --atr-stop-buffer 0.05 --entry-buffer 0 --no-sticky-stop`.
+Earlier versions for comparison: version G = `--no-atr-exit-on-touch --entry-buffer 0 --emergency-stop 0`;
+version #13 = `--close-exit --atr-stop-buffer 0.05 --entry-buffer 0 --no-sticky-stop --emergency-stop 0`.
 
 Version G results:
 2015-01-02 to 2026-10-02: $100k -> $254k (8.3% a year, worst drawdown -36%,
