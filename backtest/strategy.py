@@ -19,8 +19,10 @@ Rules (defaults = "version G"):
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
 
 Other options (off by default): --atr-exit-on-touch (intraday ATR stop before
-+8%), --emergency-stop X (sell at -X from entry), --no-entry-on-touch (buy at the
-next open after a close-based flip), --reentry-days 0, --ema-exit-days 1.
++8%; --atr-stop-buffer 0.03 puts it 3% below the line; --rebuy-shakeouts buys back
+at the next open when the stop sold but the close is still in an up-trend),
+--emergency-stop X (sell at -X from entry), --no-entry-on-touch (buy at the next
+open after a close-based flip), --reentry-days 0, --ema-exit-days 1.
 
 Prices are split-adjusted, not dividend-adjusted (like a TradingView chart);
 dividends received are ignored.
@@ -49,6 +51,8 @@ class Rules:
     emergency_stop: float = 0.0  # e.g. 0.09: sell everything at -9% from entry (0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
+    atr_stop_buffer: float = 0.0  # with atr_exit_on_touch: stop this far below the trail line (0.03 = 3%)
+    rebuy_shakeouts: bool = False  # after an intraday ATR stop, buy back at the next open if the trend is still up
     cost: float = 0.001
     capital: float = 100_000.0
 
@@ -101,7 +105,7 @@ def run(
     pending_exits: set[str] = set()
     pending_entries: list[tuple[str, float, bool]] = []  # (ticker, sctr, is re-entry), filled at the open
     touch_orders: list[tuple[str, float, bool]] = []  # buy-stop orders at the ATR flip level, for today
-    early_exits: dict[str, tuple[int, float]] = {}  # ticker -> (day number of an exit before +8%, sctr)
+    early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
     last_close: dict[str, float] = {}
     equity = pd.Series(np.nan, index=dates)
     trades = []
@@ -135,7 +139,7 @@ def run(
         })
         del positions[pos.ticker]
         if not pos.tp_taken and rules.reentry_days:
-            early_exits[pos.ticker] = (day_number, pos.sctr)
+            early_exits[pos.ticker] = (day_number, pos.sctr, pos.fills[-1][1] if pos.fills else "")
 
     def buy(ticker, price, day, sctr, reentry, intraday) -> bool:
         nonlocal cash
@@ -204,7 +208,7 @@ def run(
         #     price touches yesterday's trail line (at the open if it gaps below).
         if rules.atr_exit_on_touch:
             for pos in list(positions.values()):
-                stop = signals[pos.ticker].at[day, "atr_stop"]
+                stop = signals[pos.ticker].at[day, "atr_stop"] * (1 - rules.atr_stop_buffer)
                 low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
                 if pos.tp_taken or pd.isna(stop) or low is None or low > stop:
                     continue
@@ -266,9 +270,16 @@ def run(
                     candidates.append((row.ticker, row.sctr, False))  # order for tomorrow at the flip level
 
         # 5. Re-entry after an early exit: the ATR trail flips back to BUY within N days.
-        for ticker, (exit_day, sctr) in list(early_exits.items()):
+        for ticker, (exit_day, sctr, how) in list(early_exits.items()):
             sig = signals[ticker]
             if ticker in positions:
+                continue
+            # Shaken out: the intraday stop sold us, but the close is still in an
+            # up-trend (it never flipped to SELL) -> buy back at the next open.
+            if (rules.rebuy_shakeouts and how == "atr-stop" and sig.at[day, "trend"] == 1
+                    and day_number - exit_day <= rules.reentry_days):
+                pending_entries.append((ticker, sctr, True))
+                del early_exits[ticker]
                 continue
             if rules.entry_on_touch:
                 if day_number + 1 - exit_day > rules.reentry_days:

@@ -223,3 +223,21 @@ def test_idle_money_parked_in_etf():
     in_etf_after_buy = 100_000 * 11 / 10 - 165 * 100
     assert trades.iloc[0]["shares"] == 165
     assert equity.iloc[-1] == pytest.approx(in_etf_after_buy * 13 / 11 + 165 * 100)
+
+
+def test_atr_stop_buffer_and_rebuy_after_shakeout():
+    closes = [100, 100, 100, 99, 100, 101, 101]
+    dates, prices, sigs, top = make_world(closes, entry_day=1)
+    sigs["AAA"]["atr_stop"] = [np.nan, np.nan, 95.0, 99.0, 97.0, 97.0, 97.0]
+    prices["AAA"].loc[dates[3], "low"] = 97.5  # dips 1.5% below the line during the day
+    # Without a buffer the dip sells; with a 3% buffer (stop 96.03) it does not.
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, atr_exit_on_touch=True))
+    assert "atr-stop 150@99.00" in trades.iloc[0]["exits"]
+    _, trades = strategy.run(dates, prices, sigs, top,
+                             basic_rules(cost=0.0, atr_exit_on_touch=True, atr_stop_buffer=0.03))
+    assert len(trades) == 1 and "open at end" in trades.iloc[0]["exits"]
+    # Shaken out but the trend is still up at the close -> buy back at the next open.
+    rules = basic_rules(cost=0.0, atr_exit_on_touch=True, reentry_days=5, rebuy_shakeouts=True)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert list(trades["entry_date"]) == [dates[2], dates[4]]
+    assert list(trades["reentry"]) == [False, True]

@@ -115,7 +115,7 @@ The defaults are the chosen rule set ("version G"):
 | Exit after +8% | the rest at the next open after 3 closes in a row below the 20 EMA (`--ema-exit-days`), once price has closed above it |
 | Re-entry | after an exit before +8%, buy again if the ATR flips back to BUY within 5 trading days (`--reentry-days`, 0 = off) |
 | Costs | 0.1% per buy and per sell (`--cost`) |
-| Other options | `--atr-exit-on-touch` (intraday ATR stop before +8%), `--emergency-stop 0.09` (sell at -9% from entry), `--park QQQ` (keep all money not in a trade in QQQ; 0.05% per move, `--park-cost`) |
+| Other options | `--atr-exit-on-touch` (intraday ATR stop before +8%), `--emergency-stop 0.09` (sell at -9% from entry), `--park QQQ` (keep all money not in a trade in QQQ; 0.05% per move, `--park-cost`), `--atr-stop-buffer 0.03` (with `--atr-exit-on-touch`: the stop sits 3% below the line), `--rebuy-shakeouts` (buy back at the next open when the intraday stop sold but the close is still in an up-trend) |
 
 2015-01-02 to 2026-10-02: $100k -> $254k (8.3% a year, worst drawdown -36%,
 344 trades, 45% winners) vs SPY 13.8% a year. Most of the gain came in 2020

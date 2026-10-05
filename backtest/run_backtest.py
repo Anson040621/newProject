@@ -85,6 +85,10 @@ def main(argv=None):
                         help="drop the squeeze (blue cross) entry condition")
     parser.add_argument("--atr-exit-on-touch", action="store_true",
                         help="before +8%%: sell when the price touches the ATR trail, not at the next open after a close below it")
+    parser.add_argument("--atr-stop-buffer", type=float, default=defaults.atr_stop_buffer,
+                        help="with --atr-exit-on-touch: put the stop this far below the ATR line, e.g. 0.03 = 3%%")
+    parser.add_argument("--rebuy-shakeouts", action="store_true",
+                        help="after an intraday ATR stop, buy back at the next open if the close is still in an up-trend")
     parser.add_argument("--entry-on-touch", action=argparse.BooleanOptionalAction, default=defaults.entry_on_touch,
                         help="buy intraday when the price touches the ATR flip level (default on); "
                              "--no-entry-on-touch buys at the next open after a close-based flip")
@@ -105,7 +109,8 @@ def main(argv=None):
         top_n=args.top, min_sctr=args.min_sctr, position_size=args.size, max_positions=args.max_positions,
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
-        emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, park_cost=args.park_cost,
+        emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
+        atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
