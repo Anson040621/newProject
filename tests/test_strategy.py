@@ -119,3 +119,13 @@ def test_ema_exit_waits_for_consecutive_closes_below():
     _, trades = strategy.run(dates, prices, sigs, top, strategy.Rules(cost=0.0, ema_exit_days=3))
     fills = trades.iloc[0]["exits"].split("; ")
     assert fills[1].startswith(f"{dates[11].date()} exit 100@102.00")  # 3rd close below on day 10, sold day 11
+
+
+def test_entry_without_squeeze_requirement():
+    close = series([100.0] * 30 + [105.0] * 5)
+    high, low = close + 0.5, close - 0.5
+    strict = signals.ticker_signals(high, low, close)
+    loose = signals.ticker_signals(high, low, close, require_squeeze=False)
+    expected = (loose["momentum"] < 0) & loose["atr_buy"]
+    assert (loose["entry_setup"] == expected).all()
+    assert (strict["entry_setup"] == expected & strict["squeeze_on"]).all()

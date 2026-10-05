@@ -105,7 +105,7 @@ the portfolio day by day.
 | Rule | Default |
 |---|---|
 | Stocks | daily SCTR top 10 (`--top`), SCTR above 90 (`--min-sctr`) |
-| Entry | same day: squeeze on (blue crosses), momentum bar red, ATR trail flips to BUY; buy at the next open |
+| Entry | same day: squeeze on (blue crosses), momentum bar red, ATR trail flips to BUY; buy at the next open (`--no-squeeze` drops the squeeze condition) |
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
 | Exit before +8% | everything at the next open after the ATR trail flips to exit |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |

@@ -121,15 +121,18 @@ def ema(close: pd.Series, length: int = EMA_LENGTH) -> pd.Series:
     return close.ewm(span=length, adjust=False).mean()
 
 
-def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.DataFrame:
+def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_squeeze: bool = True) -> pd.DataFrame:
     """Everything the strategy needs for one ticker, one row per trading day.
 
     entry_setup: squeeze on (blue crosses accumulating) AND momentum bar red
-                 AND the ATR trail flips to BUY, all on the same bar.
+                 AND the ATR trail flips to BUY, all on the same bar. With
+                 require_squeeze=False the squeeze condition is dropped.
     """
     sq = squeeze(high, low, close)
     trail = atr_trail(high, low, close)
     out = sq.join(trail)
     out["ema20"] = ema(close)
-    out["entry_setup"] = out["squeeze_on"] & (out["momentum"] < 0) & out["atr_buy"]
+    out["entry_setup"] = (out["momentum"] < 0) & out["atr_buy"]
+    if require_squeeze:
+        out["entry_setup"] &= out["squeeze_on"]
     return out

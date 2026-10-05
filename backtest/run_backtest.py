@@ -34,7 +34,7 @@ def load_benchmark(start, refresh: bool = False) -> pd.Series:
     return spy.loc[start:]
 
 
-def prepare(start, end, top_n: int = 10):
+def prepare(start, end, top_n: int = 10, require_squeeze: bool = True):
     """Daily top N, the trading calendar, OHLC prices and signals for every ticker that ever made the top N."""
     inputs = build_inputs(start, end, "largecap")
     top = sctr.daily_top_n(inputs.closes, inputs.mask, n=top_n)
@@ -45,7 +45,7 @@ def prepare(start, end, top_n: int = 10):
     ohlc = load_ohlc(tickers)
     prices, sigs = {}, {}
     for ticker, frame in ohlc.items():
-        sigs[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"]).reindex(dates)
+        sigs[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze).reindex(dates)
         prices[ticker] = frame.reindex(dates)
     for frame in sigs.values():
         for col in ("entry_setup", "atr_exit"):
@@ -74,6 +74,8 @@ def main(argv=None):
     parser.add_argument("--take-profit", type=float, default=defaults.take_profit, help="e.g. 0.08 = +8%%")
     parser.add_argument("--ema-exit-days", type=int, default=defaults.ema_exit_days,
                         help="consecutive closes below the 20 EMA before selling the rest (default 1)")
+    parser.add_argument("--no-squeeze", action="store_true",
+                        help="drop the squeeze (blue cross) entry condition")
     parser.add_argument("--cost", type=float, default=defaults.cost, help="cost per buy/sell, e.g. 0.001 = 0.1%%")
     parser.add_argument("--trades-out", default="backtest_trades.csv")
     parser.add_argument("--equity-out", default="backtest_equity.csv")
@@ -83,7 +85,7 @@ def main(argv=None):
         top_n=args.top, min_sctr=args.min_sctr, position_size=args.size, max_positions=args.max_positions,
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
     )
-    dates, prices, sigs, top = prepare(args.start, args.end, args.top)
+    dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     equity, trades = strategy.run(dates, prices, sigs, top, rules)
     spy = load_benchmark(args.start)
 
