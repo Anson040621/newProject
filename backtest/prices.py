@@ -190,6 +190,27 @@ def load_prices(tickers=None, start=None, end=None, prices_dir: Path = PRICES_DI
     return {name: frame.sort_index().loc[start:end] for name, frame in out.items()}
 
 
+def load_ohlc(tickers, prices_dir: Path = PRICES_DIR) -> dict[str, pd.DataFrame]:
+    """Split-adjusted open/high/low/close per ticker (as on a TradingView chart).
+
+    A missing open (e.g. a session filled from Yahoo's quote) is set to the close.
+    """
+    out = {}
+    for ticker in tickers:
+        path = prices_dir / f"{ticker}.csv"
+        if not path.exists():
+            continue
+        frame = _read_price_file(path)
+        ohlc = frame.reindex(columns=["Open", "High", "Low", "Close"]).astype(float)
+        ohlc.columns = ["open", "high", "low", "close"]
+        ohlc = ohlc.dropna(subset=["close"])
+        ohlc["open"] = ohlc["open"].fillna(ohlc["close"])
+        ohlc["high"] = ohlc["high"].fillna(ohlc[["open", "close"]].max(axis=1))
+        ohlc["low"] = ohlc["low"].fillna(ohlc[["open", "close"]].min(axis=1))
+        out[ticker] = ohlc
+    return out
+
+
 def load_closes(tickers=None, start=None, end=None, prices_dir: Path = PRICES_DIR) -> pd.DataFrame:
     """Closing prices for indicators (adjusted for splits and dividends when available)."""
     return load_prices(tickers, start, end, prices_dir)["adj_close"]

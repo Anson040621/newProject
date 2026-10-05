@@ -96,8 +96,26 @@ folder.
   `download_data` fills that day from Yahoo's quote data (close, high, low,
   volume).
 
-## Next steps
+## Steps 2-4: Trading rules and backtest
 
-- Step 2: entry rules
-- Step 3: exit rules
-- Step 4: position sizing, costs, and performance report
+`backtest/signals.py` ports the two TradingView scripts (squeeze + momentum
+from "SEPA", and the "2x ATR Trailing Exit"); `backtest/strategy.py` simulates
+the portfolio day by day.
+
+| Rule | Default |
+|---|---|
+| Stocks | daily SCTR top 10 (`--top`), SCTR above 90 (`--min-sctr`) |
+| Entry | same day: squeeze on (blue crosses), momentum bar red, ATR trail flips to BUY; buy at the next open |
+| Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
+| Exit before +8% | everything at the next open after the ATR trail flips to exit |
+| Take profit | 1/3 at +8% (`--take-profit`), intraday |
+| Exit after +8% | the rest at the next open after a close below the 20 EMA (once price has closed above it) |
+| Costs | 0.1% per buy and per sell (`--cost`) |
+
+```bash
+python -m backtest.run_backtest --start 2015-01-01
+```
+
+Prints the statistics and yearly returns against SPY (with dividends) and
+writes `backtest_trades.csv` and `backtest_equity.csv`. Trade prices are
+split-adjusted; dividends on the stocks held are ignored.
