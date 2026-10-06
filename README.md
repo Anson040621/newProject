@@ -102,7 +102,7 @@ folder.
 from "SEPA", and the "2x ATR Trailing Exit"); `backtest/strategy.py` simulates
 the portfolio day by day.
 
-The defaults are the current rule set ("version #16" = #13 + break-even exit):
+The defaults are the current rule set ("version #17" = #13 + break-even exit + 50 SMA exit):
 
 | Rule | Default |
 |---|---|
@@ -112,14 +112,14 @@ The defaults are the current rule set ("version #16" = #13 + break-even exit):
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
 | Exit before +8% | a) a close below the green ATR line (SELL label): everything at the next open; b) safety net: the price touches 5% below the previous close's green line (`--atr-stop-buffer`): everything at once, at the open if it gaps below |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
-| Exit after +8% | the rest at the next open after 3 closes in a row below the 20 EMA (`--ema-exit-days`), once price has closed above it, or after a close at or below the entry price (break-even exit, `--no-breakeven-exit` to turn off) |
+| Exit after +8% | the rest at the next open after a close more than 3% below the 50-day SMA (`--sma-exit-buffer`), once price has closed above that level (`--rest-exit ema20` for the old rule: 3 closes below the 20 EMA), or after a close at or below the entry price (break-even exit, `--no-breakeven-exit` to turn off) |
 | Re-entry | after an exit before +8%, if the ATR flips back to BUY within 5 trading days of the exit, buy-stop at the flip level (`--reentry-days`, 0 = off) |
 | Costs | 0.1% per buy and per sell (`--cost`) |
 | Tested alternatives | `--entry-buffer 0.02`, `--no-close-exit --sticky-stop --atr-stop-buffer 0.03` (#14), `--emergency-stop 0.12` (#15), `--no-atr-exit-on-touch --atr-stop-buffer 0` (version G), `--park QQQ`, `--rebuy-shakeouts` |
 
-2015-01-02 to 2026-10-02 with the defaults (#16): $100k -> $258k (8.4% a year,
-worst drawdown -22%, 348 trades, 48% winners, profit factor 1.49) vs SPY 13.8% a
-year. Without the break-even exit (#13): $289k (9.5% a year, worst drawdown -26%).
+2015-01-02 to 2026-10-02 with the defaults (#17): $100k -> $352k (11.3% a year,
+worst drawdown -26%, 312 trades, 48% winners, profit factor 1.79) vs SPY 13.8% a
+year. #16 (20 EMA exit): $258k (8.4%, -22%); #13 (no break-even exit): $289k (9.5%, -26%).
 #14 (+2% entry, stop-only exit) returned 1.0% a year and #15 (#14 + 12% hard
 stop) -0.9%: the +2% entry skipped 7 of the 12 biggest winners.
 

@@ -58,18 +58,18 @@ def basic_rules(**overrides):
     """Next-open entries, 1-day EMA exit, no re-entry; each test switches on what it checks."""
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
-                    breakeven_exit=False)
+                    breakeven_exit=False, rest_exit="ema20")
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_16():
+def test_default_rules_are_version_17():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
     assert (rules.atr_exit_on_touch, rules.atr_stop_buffer, rules.close_exit) == (True, 0.05, True)
     assert not rules.sticky_stop and rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
-    assert rules.breakeven_exit
+    assert rules.breakeven_exit and (rules.rest_exit, rules.sma_exit_buffer) == ("sma50", 0.03)
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
@@ -81,6 +81,7 @@ def make_world(closes, entry_day, exit_flags=None, ema=None):
     sig["entry_setup"] = [i == entry_day for i in range(len(dates))]
     sig["atr_exit"] = exit_flags if exit_flags is not None else [False] * len(dates)
     sig["ema20"] = ema if ema is not None else close * 0.9
+    sig["sma50"] = np.nan
     sig["atr_stop"] = np.nan
     sig["setup"] = sig["entry_setup"]
     sig["atr_buy"] = sig["entry_setup"]
@@ -333,3 +334,13 @@ def test_breakeven_exit_after_take_profit():
     assert fills[1] == f"{dates[6].date()} exit 100@90.00"  # close 99.5 <= 100 on day 5 -> next open
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
     assert "open at end" in trades.iloc[0]["exits"]  # without it: held all the way down
+
+
+def test_rest_exit_on_close_3pct_below_50_sma():
+    #        signal entry +8%  above  dips 2% below SMA  3.5% below -> sell next open
+    closes = [100, 100, 100, 109, 112, 107.8, 106.15, 106]
+    dates, prices, sigs, top = make_world(closes, entry_day=1)
+    sigs["AAA"]["sma50"] = 110.0  # level = 110 x 0.97 = 106.70
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, rest_exit="sma50", sma_exit_buffer=0.03))
+    fills = trades.iloc[0]["exits"].split("; ")
+    assert fills[1] == f"{dates[7].date()} exit 100@106.00"  # close 106.15 < 106.70 on day 6

@@ -1,6 +1,6 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #16 = #13 + break-even exit):
+Rules (defaults = version #17 = #13 + break-even exit + 50 SMA exit):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
   Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
           crosses), the momentum bar is red and the 2x ATR trail is in a
@@ -15,10 +15,11 @@ Rules (defaults = version #16 = #13 + break-even exit):
             b) safety net: the price touches 5% below the previous close's green
                line: sell everything at once (at the open if it gaps below).
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
-          after +8%:  sell the rest at the next open after 3 closes in a row
-                      below the 20 EMA, once price has closed above the 20 EMA
-                      since entry, or after a close at or below the entry price
-                      (break-even exit, --no-breakeven-exit to turn off).
+          after +8%:  sell the rest at the next open after a close more than 3%
+                      below the 50-day SMA, once price has closed above that level
+                      since entry (--rest-exit ema20 for the old rule: 3 closes in
+                      a row below the 20 EMA), or after a close at or below the
+                      entry price (break-even exit, --no-breakeven-exit to turn off).
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days of the exit: buy-stop at the flip level (no other
           conditions).
@@ -62,6 +63,8 @@ class Rules:
     close_exit: bool = True  # before +8%: also sell at the next open after a close below the line
     entry_buffer: float = 0.0  # buy-stop this far above the ATR flip level (entries and re-entries)
     breakeven_exit: bool = True  # after +8%: sell the rest at the next open after a close at/below the entry
+    rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
+    sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
     rebuy_shakeouts: bool = False  # after an intraday ATR stop, buy back at the next open if the trend is still up
     cost: float = 0.001
     capital: float = 100_000.0
@@ -76,8 +79,8 @@ class Position:
     initial_shares: int
     sctr: float
     tp_taken: bool = False
-    armed: bool = False  # has closed above the 20 EMA since entry
-    closes_below_ema: int = 0  # consecutive closes below the 20 EMA
+    armed: bool = False  # has closed above the rest-exit line (20 EMA or 50 SMA level) since entry
+    closes_below_ema: int = 0  # consecutive closes below that line
     days_without_price: int = 0
     intraday_entry: bool = False
     stop_line: float = float("nan")  # green line the intraday stop is based on
@@ -254,7 +257,7 @@ def run(
         # 3. At the close: exit signals for open positions.
         for pos in list(positions.values()):
             sig = signals[pos.ticker]
-            close, ema20 = px(pos.ticker, day, "close"), sig.at[day, "ema20"]
+            close = px(pos.ticker, day, "close")
             if close is None:
                 # Delisted or halted: after 10 trading days without a price, close at the last price.
                 pos.days_without_price += 1
@@ -265,18 +268,23 @@ def run(
                 continue
             pos.days_without_price = 0
             last_close[pos.ticker] = close
-            pos.closes_below_ema = pos.closes_below_ema + 1 if close < ema20 else 0
+            # The line the rest (after +8%) is sold on: 3% below the 50-day SMA, or the 20 EMA.
+            if rules.rest_exit == "sma50" and pd.notna(sig.at[day, "sma50"]):
+                rest_line, closes_needed = sig.at[day, "sma50"] * (1 - rules.sma_exit_buffer), 1
+            else:
+                rest_line, closes_needed = sig.at[day, "ema20"], rules.ema_exit_days
+            pos.closes_below_ema = pos.closes_below_ema + 1 if close < rest_line else 0
             if not pos.tp_taken:
                 # A close below the ATR line (the trail flips to SELL) always exits at the
                 # next open, also with the intraday stop: with --atr-stop-buffer the stop
                 # sits below the line, so a close can land between the two.
                 if (rules.close_exit or not rules.atr_exit_on_touch) and bool(sig.at[day, "atr_exit"]):
                     pending_exits.add(pos.ticker)
-            elif pos.armed and pos.closes_below_ema >= rules.ema_exit_days:
+            elif pos.armed and pos.closes_below_ema >= closes_needed:
                 pending_exits.add(pos.ticker)
             elif rules.breakeven_exit and close <= pos.entry_price:
                 pending_exits.add(pos.ticker)  # gave back the whole gain: get out at break-even
-            if close > ema20:
+            if close > rest_line:
                 pos.armed = True
 
         # 4. At the close: new entry signals among today's top 10.
