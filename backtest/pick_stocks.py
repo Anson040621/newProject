@@ -53,14 +53,16 @@ def build_inputs(start, end, universe: str) -> Inputs:
         prices = load_prices(tickers_between(membership, start, end or pd.Timestamp.today()), end=end)
         mask = membership_mask(membership, prices["adj_close"].index, prices["adj_close"].columns)
     else:
-        prices = load_prices(end=end)
+        # Market caps are calibrated to today's share counts (Nasdaq), so they need the
+        # full price, split and filing history even when only an earlier period is wanted.
+        prices = load_prices()
         mcap, mask = large_cap_universe(prices["close"], prices["splits"], load_shares(), load_listings(), membership)
 
     in_period = mask.loc[start:end].any()
     keep = in_period.index[in_period]
 
     def trim(frame):
-        return frame[keep].loc[start - WARMUP :]
+        return frame[keep].loc[start - WARMUP : end]
 
     return Inputs(trim(prices["adj_close"]), trim(prices["close"]), trim(mask), trim(mcap) if mcap is not None else None)
 
