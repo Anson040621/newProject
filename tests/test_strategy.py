@@ -362,3 +362,21 @@ def test_failed_breakout_sells_next_open():
     sig["trend"] = [-1, 1, 1, 1, 1, 1]
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert "failed-breakout" not in trades.iloc[0]["exits"]
+
+
+def test_dim_green_follow_up_entry_within_window():
+    # Bought on the full setup (day 2), sold at the open of day 5; on day 6 the same
+    # setup shows up with a dim green momentum bar instead of red.
+    closes = [100, 100, 100, 101, 99, 98, 99, 100, 101, 102]
+    exits = [False, False, False, True, False, False, False, False, False, False]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
+    sigs["AAA"]["setup_dim_green"] = [False] * 6 + [True] + [False] * 3
+    sigs["AAA"]["atr_buy"] = [False, True] + [False] * 4 + [True] + [False] * 3
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, dim_green_days=42))
+    assert list(trades["entry_date"]) == [dates[2], dates[7]]
+    assert list(trades["entry_kind"]) == ["setup", "dim-green"]
+    # Off by default, and ignored once the setup entry is older than the window.
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
+    assert len(trades) == 1
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, dim_green_days=3))
+    assert len(trades) == 1

@@ -127,6 +127,7 @@ def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_sq
     entry_setup: squeeze on (blue crosses accumulating) AND momentum bar red
                  AND the ATR trail flips to BUY, all on the same bar. With
                  require_squeeze=False the squeeze condition is dropped.
+    setup_dim_green: the same, but with a dim green momentum bar instead of red.
     """
     sq = squeeze(high, low, close)
     trail = atr_trail(high, low, close)
@@ -143,4 +144,9 @@ def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_sq
     if require_squeeze:
         out["setup"] &= out["squeeze_on"]
     out["entry_setup"] = out["setup"] & out["atr_buy"]
+    # Dim green momentum bar: above zero but not rising (the script's dimGreen color).
+    # Used for the optional follow-up entry (Rules.dim_green_days).
+    out["setup_dim_green"] = (out["momentum"] > 0) & (out["momentum"] <= out["momentum"].shift(1))
+    if require_squeeze:
+        out["setup_dim_green"] &= out["squeeze_on"]
     return out

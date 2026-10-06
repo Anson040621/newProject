@@ -25,6 +25,9 @@ Rules (defaults = version #17 = #13 + break-even exit + 50 SMA exit):
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days of the exit: buy-stop at the flip level (no other
           conditions).
+  Option --dim-green-days N: for N trading days after an entry on the full
+          setup (42 = about 2 months), once we have sold, the same setup with a
+          dim green momentum bar (above zero, not rising) also counts.
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
 
 Tested alternatives (options): --entry-buffer 0.02 (buy-stop 2% above the flip),
@@ -68,6 +71,7 @@ class Rules:
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
+    dim_green_days: int = 0  # for N trading days after a full-setup entry, also buy the setup on a dim green bar
     rebuy_shakeouts: bool = False  # after an intraday ATR stop, buy back at the next open if the trend is still up
     cost: float = 0.001
     capital: float = 100_000.0
@@ -88,6 +92,7 @@ class Position:
     intraday_entry: bool = False
     stop_line: float = float("nan")  # green line the intraday stop is based on
     reentry: bool = False
+    kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
     proceeds: float = 0.0  # cash received from sales so far (after costs)
     cost_basis: float = 0.0  # cash paid at entry (incl. costs)
     fills: list = field(default_factory=list)
@@ -120,9 +125,10 @@ def run(
     cash = rules.capital
     positions: dict[str, Position] = {}
     pending_exits: dict[str, str] = {}  # ticker -> reason, sold at the next open
-    pending_entries: list[tuple[str, float, bool]] = []  # (ticker, sctr, is re-entry), filled at the open
-    touch_orders: list[tuple[str, float, bool]] = []  # buy-stop orders at the ATR flip level, for today
+    pending_entries: list[tuple[str, float, str]] = []  # (ticker, sctr, kind), filled at the open
+    touch_orders: list[tuple[str, float, str]] = []  # buy-stop orders at the ATR flip level, for today
     early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
+    setup_entries: dict[str, int] = {}  # ticker -> day number of the last full-setup entry
     last_close: dict[str, float] = {}
     equity = pd.Series(np.nan, index=dates)
     trades = []
@@ -147,6 +153,7 @@ def run(
             "shares": pos.initial_shares,
             "sctr_at_signal": pos.sctr,
             "reentry": pos.reentry,
+            "entry_kind": pos.kind,
             "exit_date": day,
             "exits": "; ".join(f"{d.date()} {r} {s}@{p:.2f}" for d, r, s, p in pos.fills),
             "took_profit": pos.tp_taken,
@@ -158,7 +165,7 @@ def run(
         if not pos.tp_taken and rules.reentry_days:
             early_exits[pos.ticker] = (day_number, pos.sctr, pos.fills[-1][1] if pos.fills else "")
 
-    def buy(ticker, price, day, sctr, reentry, intraday) -> bool:
+    def buy(ticker, price, day, sctr, kind, intraday) -> bool:
         nonlocal cash
         if len(positions) >= rules.max_positions or ticker in positions:
             return False
@@ -168,8 +175,10 @@ def run(
         paid = shares * price * (1 + rules.cost)
         cash -= paid * (1 + park_cost)
         positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid,
-                                     intraday_entry=intraday, reentry=reentry)
+                                     intraday_entry=intraday, reentry=kind == "reentry", kind=kind)
         early_exits.pop(ticker, None)
+        if kind == "setup":
+            setup_entries[ticker] = day_number
         return True
 
     park_cost = rules.park_cost if park is not None else 0.0
@@ -192,20 +201,20 @@ def run(
                 close_out(pos, day)
         pending_exits.clear()
 
-        for ticker, sctr, reentry in pending_entries:
+        for ticker, sctr, kind in pending_entries:
             price = px(ticker, day, "open") or px(ticker, day, "close")
             if price is not None:
-                buy(ticker, price, day, sctr, reentry, intraday=False)
+                buy(ticker, price, day, sctr, kind, intraday=False)
         pending_entries = []
 
         # 1b. Buy-stop orders at the ATR flip level (--entry-on-touch): filled when the
         #     high reaches yesterday's trail line, at the open if it gaps above.
-        for ticker, sctr, reentry in touch_orders:
+        for ticker, sctr, kind in touch_orders:
             level = signals[ticker].at[day, "flip_level"] * (1 + rules.entry_buffer)
             high, open_ = px(ticker, day, "high"), px(ticker, day, "open")
             if pd.isna(level) or high is None or high < level:
                 continue
-            buy(ticker, max(level, open_) if open_ is not None else level, day, sctr, reentry, intraday=True)
+            buy(ticker, max(level, open_) if open_ is not None else level, day, sctr, kind, intraday=True)
         touch_orders = []
 
         # 2. Hard stop: sell everything at -X% from the entry (at the open if it gaps below).
@@ -303,10 +312,17 @@ def run(
                 sig = signals.get(row.ticker)
                 if sig is None or row.ticker in positions:
                     continue
+                # Follow-up entry: we bought this stock on the full setup within the last
+                # N days and have since sold; now the same setup with a dim green bar counts too.
+                since = day_number - setup_entries.get(row.ticker, -10**9)
+                kind = "dim-green" if rules.dim_green_days and since <= rules.dim_green_days else None
                 if not rules.entry_on_touch and bool(sig.at[day, "entry_setup"]):
-                    candidates.append((row.ticker, row.sctr, False))
+                    candidates.append((row.ticker, row.sctr, "setup"))
                 elif rules.entry_on_touch and bool(sig.at[day, "setup"]) and sig.at[day, "trend"] != 1:
-                    candidates.append((row.ticker, row.sctr, False))  # order for tomorrow at the flip level
+                    candidates.append((row.ticker, row.sctr, "setup"))  # order for tomorrow at the flip level
+                elif kind and bool(sig.at[day, "setup_dim_green"]) and (
+                        sig.at[day, "trend"] != 1 if rules.entry_on_touch else bool(sig.at[day, "atr_buy"])):
+                    candidates.append((row.ticker, row.sctr, kind))
 
         # 5. Re-entry after an early exit: the ATR trail flips back to BUY within N days.
         for ticker, (exit_day, sctr, how) in list(early_exits.items()):
@@ -317,18 +333,18 @@ def run(
             # up-trend (it never flipped to SELL) -> buy back at the next open.
             if (rules.rebuy_shakeouts and how == "atr-stop" and sig.at[day, "trend"] == 1
                     and day_number - exit_day <= rules.reentry_days):
-                pending_entries.append((ticker, sctr, True))
+                pending_entries.append((ticker, sctr, "reentry"))
                 del early_exits[ticker]
                 continue
             if rules.entry_on_touch:
                 if day_number + 1 - exit_day > rules.reentry_days:
                     del early_exits[ticker]
                 elif sig.at[day, "trend"] != 1:
-                    candidates.insert(0, (ticker, sctr, True))
+                    candidates.insert(0, (ticker, sctr, "reentry"))
             elif day_number - exit_day > rules.reentry_days:
                 del early_exits[ticker]
             elif bool(sig.at[day, "atr_buy"]):
-                candidates.insert(0, (ticker, sctr, True))
+                candidates.insert(0, (ticker, sctr, "reentry"))
 
         seen = set()
         for order in candidates:

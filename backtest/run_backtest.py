@@ -55,7 +55,7 @@ def prepare(start, end, top_n: int = 10, require_squeeze: bool = True):
         sigs[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze).reindex(dates)
         prices[ticker] = frame.reindex(dates)
     for frame in sigs.values():
-        for col in ("setup", "entry_setup", "atr_buy", "atr_exit"):
+        for col in ("setup", "entry_setup", "setup_dim_green", "atr_buy", "atr_exit"):
             frame[col] = frame[col].fillna(False).astype(bool)
     return dates, prices, sigs, top
 
@@ -113,6 +113,9 @@ def main(argv=None):
                         help="hard stop: sell everything at this loss from entry, e.g. 0.12 = -12%% (default; 0 = off)")
     parser.add_argument("--reentry-days", type=int, default=defaults.reentry_days,
                         help="re-buy if the ATR flips back to BUY within N days of an early exit (default 5, 0 = off)")
+    parser.add_argument("--dim-green-days", type=int, default=defaults.dim_green_days,
+                        help="for N trading days after a full-setup entry (e.g. 42 = about 2 months), after we have "
+                             "exited, also buy the same setup with a dim green momentum bar (default 0 = off)")
     parser.add_argument("--park", default=None, metavar="ETF",
                         help="keep all money not in a trade in this ETF, e.g. QQQ (default: cash)")
     parser.add_argument("--park-cost", type=float, default=defaults.park_cost,
@@ -129,7 +132,7 @@ def main(argv=None):
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
-        rest_exit=args.rest_exit, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
+        rest_exit=args.rest_exit, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
