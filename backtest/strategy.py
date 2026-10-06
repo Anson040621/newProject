@@ -7,6 +7,8 @@ Rules (defaults = version #17 = #13 + break-even exit + 50 SMA exit):
           down-trend. Next day: buy-stop at the ATR flip level (that close's
           trail line); filled when the price touches it, or at the open if it
           gaps above.
+          Option --failed-breakout-exit: if the entry day closes back below the
+          flip level (no BUY signal, no green line yet), sell at the next open.
   Size    15% of account equity per trade, at most 6 positions. When more
           signals than free slots appear, the highest SCTR goes first.
   Exit    before +8%, whichever comes first:
@@ -63,6 +65,7 @@ class Rules:
     close_exit: bool = True  # before +8%: also sell at the next open after a close below the line
     entry_buffer: float = 0.0  # buy-stop this far above the ATR flip level (entries and re-entries)
     breakeven_exit: bool = True  # after +8%: sell the rest at the next open after a close at/below the entry
+    failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
     rebuy_shakeouts: bool = False  # after an intraday ATR stop, buy back at the next open if the trend is still up
@@ -116,7 +119,7 @@ def run(
 
     cash = rules.capital
     positions: dict[str, Position] = {}
-    pending_exits: set[str] = set()
+    pending_exits: dict[str, str] = {}  # ticker -> reason, sold at the next open
     pending_entries: list[tuple[str, float, bool]] = []  # (ticker, sctr, is re-entry), filled at the open
     touch_orders: list[tuple[str, float, bool]] = []  # buy-stop orders at the ATR flip level, for today
     early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
@@ -181,11 +184,11 @@ def run(
             cash *= park_open[day_number] / park_close[day_number - 1]
 
         # 1. Orders from yesterday's close are filled at today's open.
-        for ticker in sorted(pending_exits):
+        for ticker, reason in sorted(pending_exits.items()):
             pos = positions.get(ticker)
             price = px(ticker, day, "open") or px(ticker, day, "close")
             if pos is not None and price is not None:
-                sell(pos, pos.shares, price, day, "exit")
+                sell(pos, pos.shares, price, day, reason)
                 close_out(pos, day)
         pending_exits.clear()
 
@@ -264,7 +267,7 @@ def run(
                 if pos.days_without_price > 10:
                     sell(pos, pos.shares, last_close.get(pos.ticker, pos.entry_price), day, "no price")
                     close_out(pos, day)
-                    pending_exits.discard(pos.ticker)
+                    pending_exits.pop(pos.ticker, None)
                 continue
             pos.days_without_price = 0
             last_close[pos.ticker] = close
@@ -274,16 +277,21 @@ def run(
             else:
                 rest_line, closes_needed = sig.at[day, "ema20"], rules.ema_exit_days
             pos.closes_below_ema = pos.closes_below_ema + 1 if close < rest_line else 0
-            if not pos.tp_taken:
+            if (rules.failed_breakout_exit and pos.intraday_entry and pos.entry_date == day
+                    and sig.at[day, "trend"] != 1 and pos.shares > 0):
+                # Bought on the touch of the flip level, but the day closed back below it:
+                # no BUY signal and no green line (so no stop). Get out at the next open.
+                pending_exits[pos.ticker] = "failed-breakout"
+            elif not pos.tp_taken:
                 # A close below the ATR line (the trail flips to SELL) always exits at the
                 # next open, also with the intraday stop: with --atr-stop-buffer the stop
                 # sits below the line, so a close can land between the two.
                 if (rules.close_exit or not rules.atr_exit_on_touch) and bool(sig.at[day, "atr_exit"]):
-                    pending_exits.add(pos.ticker)
+                    pending_exits[pos.ticker] = "exit"
             elif pos.armed and pos.closes_below_ema >= closes_needed:
-                pending_exits.add(pos.ticker)
+                pending_exits[pos.ticker] = "exit"
             elif rules.breakeven_exit and close <= pos.entry_price:
-                pending_exits.add(pos.ticker)  # gave back the whole gain: get out at break-even
+                pending_exits[pos.ticker] = "breakeven"  # gave back the whole gain
             if close > rest_line:
                 pos.armed = True
 

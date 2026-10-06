@@ -92,6 +92,9 @@ def main(argv=None):
                         help="keep the last stop when the green line disappears, never lower it (default on)")
     parser.add_argument("--breakeven-exit", action=argparse.BooleanOptionalAction, default=defaults.breakeven_exit,
                         help="after +8%%: sell the rest at the next open after a close at or below the entry (default on)")
+    parser.add_argument("--failed-breakout-exit", action=argparse.BooleanOptionalAction,
+                        default=defaults.failed_breakout_exit,
+                        help="sell at the next open if the entry day closes back below the flip level (default off)")
     parser.add_argument("--rest-exit", choices=["sma50", "ema20"], default=defaults.rest_exit,
                         help="after +8%%: sma50 = close more than --sma-exit-buffer below the 50 SMA (default); "
                              "ema20 = --ema-exit-days closes in a row below the 20 EMA")
@@ -126,7 +129,7 @@ def main(argv=None):
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
-        rest_exit=args.rest_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
+        rest_exit=args.rest_exit, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None

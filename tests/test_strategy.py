@@ -58,7 +58,7 @@ def basic_rules(**overrides):
     """Next-open entries, 1-day EMA exit, no re-entry; each test switches on what it checks."""
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
-                    breakeven_exit=False, rest_exit="ema20")
+                    breakeven_exit=False, rest_exit="ema20", failed_breakout_exit=False)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
@@ -70,6 +70,7 @@ def test_default_rules_are_version_17():
     assert (rules.atr_exit_on_touch, rules.atr_stop_buffer, rules.close_exit) == (True, 0.05, True)
     assert not rules.sticky_stop and rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
     assert rules.breakeven_exit and (rules.rest_exit, rules.sma_exit_buffer) == ("sma50", 0.03)
+    assert not rules.failed_breakout_exit
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
@@ -331,7 +332,7 @@ def test_breakeven_exit_after_take_profit():
     dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, breakeven_exit=True))
     fills = trades.iloc[0]["exits"].split("; ")
-    assert fills[1] == f"{dates[6].date()} exit 100@90.00"  # close 99.5 <= 100 on day 5 -> next open
+    assert fills[1] == f"{dates[6].date()} breakeven 100@90.00"  # close 99.5 <= 100 on day 5 -> next open
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
     assert "open at end" in trades.iloc[0]["exits"]  # without it: held all the way down
 
@@ -344,3 +345,20 @@ def test_rest_exit_on_close_3pct_below_50_sma():
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, rest_exit="sma50", sma_exit_buffer=0.03))
     fills = trades.iloc[0]["exits"].split("; ")
     assert fills[1] == f"{dates[7].date()} exit 100@106.00"  # close 106.15 < 106.70 on day 6
+
+
+def test_failed_breakout_sells_next_open():
+    # COIN, Apr 2024: bought on the touch of the flip level, the day closes back below it.
+    closes = [100, 100, 99, 95, 90, 85]
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["setup"] = [True, False, False, False, False, False]
+    sig["trend"] = [-1, -1, -1, -1, -1, -1]  # never flips up
+    sig["flip_level"] = [np.nan, 100.5, 100.5, 100.5, 100.5, 100.5]  # day 1 high 101 touches it
+    rules = basic_rules(cost=0.0, entry_on_touch=True, failed_breakout_exit=True)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"] == f"{dates[2].date()} failed-breakout 149@99.00"
+    # A confirmed breakout (close above the level, trend flips up) is kept.
+    sig["trend"] = [-1, 1, 1, 1, 1, 1]
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert "failed-breakout" not in trades.iloc[0]["exits"]
