@@ -102,7 +102,7 @@ folder.
 from "SEPA", and the "2x ATR Trailing Exit"); `backtest/strategy.py` simulates
 the portfolio day by day.
 
-The defaults are the current rule set ("version #17" = #13 + break-even exit + 50 SMA exit):
+The defaults are the current rule set ("version #19" = #13 + break-even exit + 50 SMA exit + 2% safety net):
 
 | Rule | Default |
 |---|---|
@@ -110,20 +110,19 @@ The defaults are the current rule set ("version #17" = #13 + break-even exit + 5
 | Setup (at a close) | in the top 10, squeeze on (blue crosses), momentum bar red, ATR trail in a down-trend |
 | Entry | next day, buy-stop at the ATR flip level; filled when the price touches it, at the open if it gaps above (`--entry-buffer` to place it higher) |
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
-| Exit before +8% | a) a close below the green ATR line (SELL label): everything at the next open; b) safety net: the price touches 5% below the previous close's green line (`--atr-stop-buffer`): everything at once, at the open if it gaps below |
+| Exit before +8% | a) a close below the green ATR line (SELL label): everything at the next open; b) safety net: the price touches 2% below the previous close's green line (`--atr-stop-buffer`): everything at once, at the open if it gaps below |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
 | Exit after +8% | the rest at the next open after a close more than 3% below the 50-day SMA (`--sma-exit-buffer`), once price has closed above that level (`--rest-exit ema20` for the old rule: 3 closes below the 20 EMA), or after a close at or below the entry price (break-even exit, `--no-breakeven-exit` to turn off) |
 | Re-entry | after an exit before +8%, if the ATR flips back to BUY within 5 trading days of the exit, buy-stop at the flip level (`--reentry-days`, 0 = off) |
 | Costs | 0.1% per buy and per sell (`--cost`) |
-| Tested alternatives | `--dim-green-days 42` (within about 2 months of a full-setup entry we have exited, also buy the same setup with a dim green momentum bar: 12.3% a year, worst drop -26.3%, but only 7 extra trades and most of the gain is one trade, WDC Apr 2026), `--failed-breakout-exit` (sell at the next open when the entry day closes back below the flip level: 5.4% a year), `--emergency-stop 0.12` on #17 (6.6% a year), `--entry-buffer 0.02`, `--no-close-exit --sticky-stop --atr-stop-buffer 0.03` (#14), `--emergency-stop 0.12` (#15), `--no-atr-exit-on-touch --atr-stop-buffer 0` (version G), `--park QQQ`, `--rebuy-shakeouts` |
+| Tested alternatives | `--atr-stop-buffer` 0 / 0.03 / 0.05 (safety net on the line / 3% / 5% below it: 10.0% / 11.3% / 11.3% a year, the 5% one is version #17), `--dim-green-days 42` (within about 2 months of a full-setup entry we have exited, also buy the same setup with a dim green momentum bar: 12.3% a year, worst drop -26.3%, but only 7 extra trades and most of the gain is one trade, WDC Apr 2026), `--failed-breakout-exit` (sell at the next open when the entry day closes back below the flip level: 5.4% a year), `--emergency-stop 0.12` on #17 (6.6% a year), `--entry-buffer 0.02`, `--no-close-exit --sticky-stop --atr-stop-buffer 0.03` (#14), `--emergency-stop 0.12` (#15), `--no-atr-exit-on-touch --atr-stop-buffer 0` (version G), `--park QQQ`, `--rebuy-shakeouts` |
 
-2015-01-02 to 2026-10-02 with the defaults (#17): $100k -> $352k (11.3% a year,
-worst drawdown -26%, 312 trades, 48% winners, profit factor 1.79) vs SPY 13.8% a
-year. #16 (20 EMA exit): $258k (8.4%, -22%); #13 (no break-even exit): $289k (9.5%, -26%).
+2015-01-02 to 2026-10-02 with the defaults (#19): $100k -> $375k (11.9% a year,
+worst drawdown -24%, 307 trades, 48% winners, profit factor 1.88) vs SPY 13.8% a
+year. #17 (5% safety net): $352k (11.3%, -26%). #16 (20 EMA exit): $258k (8.4%, -22%); #13 (no break-even exit): $289k (9.5%, -26%).
 #14 (+2% entry, stop-only exit) returned 1.0% a year and #15 (#14 + 12% hard
 stop) -0.9%: the +2% entry skipped 7 of the 12 biggest winners.
 
-Version G results:
 Version G results:
 2015-01-02 to 2026-10-02: $100k -> $254k (8.3% a year, worst drawdown -36%,
 344 trades, 45% winners) vs SPY 13.8% a year. Most of the gain came in 2020

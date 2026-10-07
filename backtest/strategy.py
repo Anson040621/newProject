@@ -1,6 +1,6 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #17 = #13 + break-even exit + 50 SMA exit):
+Rules (defaults = version #19 = #13 + break-even exit + 50 SMA exit + 2% safety net):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
   Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
           crosses), the momentum bar is red and the 2x ATR trail is in a
@@ -14,7 +14,7 @@ Rules (defaults = version #17 = #13 + break-even exit + 50 SMA exit):
   Exit    before +8%, whichever comes first:
             a) a close below the green ATR line (the SELL label): sell
                everything at the next open;
-            b) safety net: the price touches 5% below the previous close's green
+            b) safety net: the price touches 2% below the previous close's green
                line: sell everything at once (at the open if it gaps below).
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
           after +8%:  sell the rest at the next open after a close more than 3%
@@ -63,7 +63,7 @@ class Rules:
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
-    atr_stop_buffer: float = 0.05  # with atr_exit_on_touch: stop this far below the trail line (0.05 = 5%)
+    atr_stop_buffer: float = 0.02  # with atr_exit_on_touch: stop this far below the trail line (0.02 = 2%)
     sticky_stop: bool = False  # keep the last stop when the green line disappears; never lower it
     close_exit: bool = True  # before +8%: also sell at the next open after a close below the line
     entry_buffer: float = 0.0  # buy-stop this far above the ATR flip level (entries and re-entries)

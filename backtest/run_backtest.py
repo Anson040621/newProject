@@ -103,7 +103,7 @@ def main(argv=None):
     parser.add_argument("--entry-buffer", type=float, default=defaults.entry_buffer,
                         help="buy-stop this far above the ATR flip level, e.g. 0.02 = 2%% (default)")
     parser.add_argument("--atr-stop-buffer", type=float, default=defaults.atr_stop_buffer,
-                        help="put the intraday stop this far below the ATR line, e.g. 0.03 = 3%% (default)")
+                        help="put the intraday stop this far below the ATR line (default 0.02 = 2%%)")
     parser.add_argument("--rebuy-shakeouts", action="store_true",
                         help="after an intraday ATR stop, buy back at the next open if the close is still in an up-trend")
     parser.add_argument("--entry-on-touch", action=argparse.BooleanOptionalAction, default=defaults.entry_on_touch,
