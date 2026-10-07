@@ -25,6 +25,9 @@ Rules (defaults = version #19 = #13 + break-even exit + 50 SMA exit + 2% safety 
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days of the exit: buy-stop at the flip level (no other
           conditions).
+  Option --close-entry: when the whole setup (squeeze on, red bar, ATR flips to
+          BUY) only shows on the BUY bar itself - so no buy-stop was waiting - buy at
+          the next open.
   Option --dim-green-days N: for N trading days after an entry on the full
           setup (42 = about 2 months), once we have sold, the same setup with a
           dim green momentum bar (above zero, not rising) also counts.
@@ -71,6 +74,7 @@ class Rules:
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
+    close_entry: bool = False  # also buy at the next open when the whole setup shows on the BUY bar itself
     dim_green_days: int = 0  # for N trading days after a full-setup entry, also buy the setup on a dim green bar
     rebuy_shakeouts: bool = False  # after an intraday ATR stop, buy back at the next open if the trend is still up
     cost: float = 0.001
@@ -129,6 +133,7 @@ def run(
     touch_orders: list[tuple[str, float, str]] = []  # buy-stop orders at the ATR flip level, for today
     early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
     setup_entries: dict[str, int] = {}  # ticker -> day number of the last full-setup entry
+    entered_today: set[str] = set()
     last_close: dict[str, float] = {}
     equity = pd.Series(np.nan, index=dates)
     trades = []
@@ -177,7 +182,8 @@ def run(
         positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid,
                                      intraday_entry=intraday, reentry=kind == "reentry", kind=kind)
         early_exits.pop(ticker, None)
-        if kind == "setup":
+        entered_today.add(ticker)
+        if kind in ("setup", "setup-close"):
             setup_entries[ticker] = day_number
         return True
 
@@ -188,6 +194,7 @@ def run(
 
     prev_equity = cash
     for day_number, day in enumerate(dates):
+        entered_today.clear()
         # 0. Idle money in the parking ETF earns its overnight return (yesterday's close -> today's open).
         if park is not None and day_number > 0 and park_open[day_number] > 0 and park_close[day_number - 1] > 0:
             cash *= park_open[day_number] / park_close[day_number - 1]
@@ -306,7 +313,7 @@ def run(
 
         # 4. At the close: new entry signals among today's top 10.
         today = top_by_day.get(day)
-        candidates = []
+        candidates, close_setups = [], []
         if today is not None:
             for row in today.itertuples():
                 sig = signals.get(row.ticker)
@@ -320,6 +327,11 @@ def run(
                     candidates.append((row.ticker, row.sctr, "setup"))
                 elif rules.entry_on_touch and bool(sig.at[day, "setup"]) and sig.at[day, "trend"] != 1:
                     candidates.append((row.ticker, row.sctr, "setup"))  # order for tomorrow at the flip level
+                elif (rules.entry_on_touch and rules.close_entry and bool(sig.at[day, "entry_setup"])
+                        and row.ticker not in entered_today):
+                    # The squeeze / red bar only appeared on the BUY bar itself, so no order was
+                    # waiting at the flip level (HOOD, 9 Apr 2025): buy at the next open instead.
+                    close_setups.append((row.ticker, row.sctr, "setup-close"))
                 elif kind and bool(sig.at[day, "setup_dim_green"]) and (
                         sig.at[day, "trend"] != 1 if rules.entry_on_touch else bool(sig.at[day, "atr_buy"])):
                     candidates.append((row.ticker, row.sctr, kind))
@@ -351,6 +363,10 @@ def run(
             if order[0] not in seen:
                 seen.add(order[0])
                 (touch_orders if rules.entry_on_touch else pending_entries).append(order)
+        for order in close_setups:
+            if order[0] not in seen:
+                seen.add(order[0])
+                pending_entries.append(order)
 
         prev_equity = cash + sum(p.shares * last_close.get(p.ticker, p.entry_price) for p in positions.values())
         equity[day] = prev_equity

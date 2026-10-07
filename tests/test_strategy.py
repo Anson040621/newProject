@@ -380,3 +380,17 @@ def test_dim_green_follow_up_entry_within_window():
     assert len(trades) == 1
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, dim_green_days=3))
     assert len(trades) == 1
+
+
+def test_close_entry_buys_next_open_when_setup_shows_on_the_buy_bar():
+    # HOOD, 9 Apr 2025: the first blue cross, a red bar and the ATR flip to BUY all
+    # appear on the same day, so no buy-stop was waiting from the day before.
+    closes = [100, 100, 100, 104, 105, 106]
+    dates, prices, sigs, top = make_world(closes, entry_day=2)  # setup + atr_buy on day 2
+    rules = basic_rules(cost=0.0, entry_on_touch=True)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.empty  # the trend is already up at the close: no flip-level order
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True, close_entry=True))
+    trade = trades.iloc[0]
+    assert trade["entry_date"] == dates[3] and trade["entry_price"] == 104  # next day's open
+    assert trade["entry_kind"] == "setup-close"
