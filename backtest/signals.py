@@ -116,18 +116,68 @@ def atr_trail(high: pd.Series, low: pd.Series, close: pd.Series,
     )
 
 
+def at_touch(open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series, level: pd.Series,
+             require_squeeze: bool = True, length: int = SQUEEZE_LENGTH, steps: int = 40) -> pd.DataFrame:
+    """The live squeeze and momentum while the price rises through the ATR flip line during the day.
+
+    For each day whose high reaches `level`, the price is walked up from the line
+    (or the open, if it gaps above) to the day's high. At each price the day's bar
+    so far is: open, high = last price = that price, low = the open; the previous
+    19 bars are final - this is what the indicator panel shows live.
+
+    touch_squeeze, touch_momentum: the readings the moment the price hits the line
+    touch_price: the first price on the way up at which the squeeze is on (unless
+                 require_squeeze=False) and the momentum bar is red; NaN if never
+    """
+    o, lv = open_.to_numpy(dtype=float), level.to_numpy(dtype=float)
+    c, h, l = close.to_numpy(dtype=float), high.to_numpy(dtype=float), low.to_numpy(dtype=float)
+    tr = true_range(high, low, close).to_numpy()
+    mid = ((high.rolling(length).max() + low.rolling(length).min()) / 2 + close.rolling(length).mean()) / 2
+    x = (close - mid).to_numpy()
+    t = np.arange(length, dtype=float) - (length - 1) / 2
+
+    n = len(c)
+    squeeze_at_line, momentum_at_line, price = np.zeros(n, dtype=bool), np.full(n, np.nan), np.full(n, np.nan)
+    for i in np.flatnonzero(h >= lv):  # NaN levels compare False
+        if i < 2 * length or np.isnan(o[i]) or np.isnan(x[i - length + 1 : i]).any():
+            continue
+        first = max(lv[i], o[i])
+        prices = np.linspace(first, max(first, h[i]), steps + 1)  # the walk up, [0] = at the line
+        closes = np.hstack([np.tile(c[i - length + 1 : i], (len(prices), 1)), prices[:, None]])
+        bar_tr = np.maximum.reduce([prices - o[i], np.abs(prices - c[i - 1]), np.full(len(prices), abs(o[i] - c[i - 1]))])
+        ranges = (tr[i - length + 1 : i].sum() + bar_tr) / length
+        # Bollinger inside Keltner (same multiplier on both): stdev < average true range.
+        squeeze_on = closes.std(axis=1) < ranges
+        top = np.maximum(h[i - length + 1 : i].max(), prices)
+        bottom = min(l[i - length + 1 : i].min(), o[i])
+        xs = np.hstack([np.tile(x[i - length + 1 : i], (len(prices), 1)),
+                        (prices - ((top + bottom) / 2 + closes.mean(axis=1)) / 2)[:, None]])
+        momentum = xs.mean(axis=1) + (xs - xs.mean(axis=1, keepdims=True)) @ t / (t @ t) * t[-1]
+        ok = momentum < 0
+        if require_squeeze:
+            ok &= squeeze_on
+        squeeze_at_line[i], momentum_at_line[i] = squeeze_on[0], momentum[0]
+        if ok.any():
+            price[i] = prices[np.argmax(ok)]
+    return pd.DataFrame({"touch_squeeze": squeeze_at_line, "touch_momentum": momentum_at_line, "touch_price": price},
+                        index=close.index)
+
+
 def ema(close: pd.Series, length: int = EMA_LENGTH) -> pd.Series:
     """TradingView ta.ema (seeded with the first value)."""
     return close.ewm(span=length, adjust=False).mean()
 
 
-def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_squeeze: bool = True) -> pd.DataFrame:
+def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_squeeze: bool = True,
+                   open_: pd.Series | None = None) -> pd.DataFrame:
     """Everything the strategy needs for one ticker, one row per trading day.
 
     entry_setup: squeeze on (blue crosses accumulating) AND momentum bar red
                  AND the ATR trail flips to BUY, all on the same bar. With
                  require_squeeze=False the squeeze condition is dropped.
     setup_dim_green: the same, but with a dim green momentum bar instead of red.
+    touch_price: (with open_) the first price during the day, on the way up through
+                 the flip level, at which the squeeze is on and the bar is red (at_touch).
     """
     sq = squeeze(high, low, close)
     trail = atr_trail(high, low, close)
@@ -149,4 +199,6 @@ def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_sq
     out["setup_dim_green"] = (out["momentum"] > 0) & (out["momentum"] <= out["momentum"].shift(1))
     if require_squeeze:
         out["setup_dim_green"] &= out["squeeze_on"]
+    if open_ is not None:
+        out = out.join(at_touch(open_, high, low, close, out["flip_level"], require_squeeze))
     return out

@@ -1,6 +1,6 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #19 = #13 + break-even exit + 50 SMA exit + 2% safety net):
+Rules (defaults = version #20 = #19 with a 3% cushion on the break-even exit):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
   Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
           crosses), the momentum bar is red and the 2x ATR trail is in a
@@ -20,11 +20,17 @@ Rules (defaults = version #19 = #13 + break-even exit + 50 SMA exit + 2% safety 
           after +8%:  sell the rest at the next open after a close more than 3%
                       below the 50-day SMA, once price has closed above that level
                       since entry (--rest-exit ema20 for the old rule: 3 closes in
-                      a row below the 20 EMA), or after a close at or below the
-                      entry price (break-even exit, --no-breakeven-exit to turn off).
+                      a row below the 20 EMA), or after a close more than 3% below
+                      the entry price (break-even exit, --breakeven-buffer 0 for a
+                      close at the entry = version #19, --no-breakeven-exit = off).
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days of the exit: buy-stop at the flip level (no other
           conditions).
+  Option --entry-check live: every evening a buy order waits at the flip level for
+          each top-10 stock in an ATR down-trend; the next day it buys at the first
+          price, on the way up through the line, at which the squeeze is on and the
+          bar is red (as the indicators read live). --entry-check either: the old
+          order (setup at the previous close) or the live check.
   Option --close-entry: when the whole setup (squeeze on, red bar, ATR flips to
           BUY) only shows on the BUY bar itself - so no buy-stop was waiting - buy at
           the next open.
@@ -71,9 +77,12 @@ class Rules:
     close_exit: bool = True  # before +8%: also sell at the next open after a close below the line
     entry_buffer: float = 0.0  # buy-stop this far above the ATR flip level (entries and re-entries)
     breakeven_exit: bool = True  # after +8%: sell the rest at the next open after a close at/below the entry
+    breakeven_buffer: float = 0.03  # ... more than this far below the entry (0.03 = a close 3% below it)
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
+    entry_check: str = "prev"  # when the squeeze / red bar must show: "prev" close, "live" as the price
+    #                            crosses the flip line, or "either" (see the module docstring)
     close_entry: bool = False  # also buy at the next open when the whole setup shows on the BUY bar itself
     dim_green_days: int = 0  # for N trading days after a full-setup entry, also buy the setup on a dim green bar
     rebuy_shakeouts: bool = False  # after an intraday ATR stop, buy back at the next open if the trend is still up
@@ -183,7 +192,7 @@ def run(
                                      intraday_entry=intraday, reentry=kind == "reentry", kind=kind)
         early_exits.pop(ticker, None)
         entered_today.add(ticker)
-        if kind in ("setup", "setup-close"):
+        if kind.startswith("setup"):
             setup_entries[ticker] = day_number
         return True
 
@@ -221,7 +230,14 @@ def run(
             high, open_ = px(ticker, day, "high"), px(ticker, day, "open")
             if pd.isna(level) or high is None or high < level:
                 continue
-            buy(ticker, max(level, open_) if open_ is not None else level, day, sctr, kind, intraday=True)
+            fill = max(level, open_) if open_ is not None else level
+            if kind == "watch":
+                # Bought at the first price on the way up at which the squeeze is on and the bar red.
+                live = signals[ticker].at[day, "touch_price"]
+                if pd.isna(live):
+                    continue
+                fill, kind = max(fill, live), "setup-live"
+            buy(ticker, fill, day, sctr, kind, intraday=True)
         touch_orders = []
 
         # 2. Hard stop: sell everything at -X% from the entry (at the open if it gaps below).
@@ -306,7 +322,7 @@ def run(
                     pending_exits[pos.ticker] = "exit"
             elif pos.armed and pos.closes_below_ema >= closes_needed:
                 pending_exits[pos.ticker] = "exit"
-            elif rules.breakeven_exit and close <= pos.entry_price:
+            elif rules.breakeven_exit and close <= pos.entry_price * (1 - rules.breakeven_buffer):
                 pending_exits[pos.ticker] = "breakeven"  # gave back the whole gain
             if close > rest_line:
                 pos.armed = True
@@ -325,8 +341,12 @@ def run(
                 kind = "dim-green" if rules.dim_green_days and since <= rules.dim_green_days else None
                 if not rules.entry_on_touch and bool(sig.at[day, "entry_setup"]):
                     candidates.append((row.ticker, row.sctr, "setup"))
-                elif rules.entry_on_touch and bool(sig.at[day, "setup"]) and sig.at[day, "trend"] != 1:
-                    candidates.append((row.ticker, row.sctr, "setup"))  # order for tomorrow at the flip level
+                elif rules.entry_on_touch and sig.at[day, "trend"] != 1 and (
+                        rules.entry_check != "prev" or bool(sig.at[day, "setup"])):
+                    # Order for tomorrow at the flip level. "watch": the squeeze and red bar are
+                    # checked live tomorrow, as the price rises through the line.
+                    ready = bool(sig.at[day, "setup"]) and rules.entry_check != "live"
+                    candidates.append((row.ticker, row.sctr, "setup" if ready else "watch"))
                 elif (rules.entry_on_touch and rules.close_entry and bool(sig.at[day, "entry_setup"])
                         and row.ticker not in entered_today):
                     # The squeeze / red bar only appeared on the BUY bar itself, so no order was

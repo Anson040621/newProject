@@ -52,7 +52,8 @@ def prepare(start, end, top_n: int = 10, require_squeeze: bool = True):
     ohlc = load_ohlc(tickers)
     prices, sigs = {}, {}
     for ticker, frame in ohlc.items():
-        sigs[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze).reindex(dates)
+        sigs[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze,
+                                              open_=frame["open"]).reindex(dates)
         prices[ticker] = frame.reindex(dates)
     for frame in sigs.values():
         for col in ("setup", "entry_setup", "setup_dim_green", "atr_buy", "atr_exit"):
@@ -113,6 +114,12 @@ def main(argv=None):
                         help="hard stop: sell everything at this loss from entry, e.g. 0.12 = -12%% (default; 0 = off)")
     parser.add_argument("--reentry-days", type=int, default=defaults.reentry_days,
                         help="re-buy if the ATR flips back to BUY within N days of an early exit (default 5, 0 = off)")
+    parser.add_argument("--entry-check", choices=["prev", "live", "either"], default=defaults.entry_check,
+                        help="prev: buy-stop only after a setup at the previous close; live: buy-stop for every top-10 "
+                             "stock in a down-trend, bought where the squeeze and red bar show as the price rises "
+                             "through the line; either: both")
+    parser.add_argument("--breakeven-buffer", type=float, default=defaults.breakeven_buffer,
+                        help="after +8%%: the break-even exit needs a close this far below the entry (default 0.03)")
     parser.add_argument("--close-entry", action=argparse.BooleanOptionalAction, default=defaults.close_entry,
                         help="also buy at the next open when the squeeze, red bar and ATR flip to BUY all show on "
                              "the same bar (the buy-stop needs the setup at the previous close) (default off)")
@@ -135,7 +142,7 @@ def main(argv=None):
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
-        rest_exit=args.rest_exit, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
+        rest_exit=args.rest_exit, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, args.top, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None

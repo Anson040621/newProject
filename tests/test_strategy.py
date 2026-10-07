@@ -58,12 +58,12 @@ def basic_rules(**overrides):
     """Next-open entries, 1-day EMA exit, no re-entry; each test switches on what it checks."""
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
-                    breakeven_exit=False, rest_exit="ema20", failed_breakout_exit=False)
+                    breakeven_exit=False, breakeven_buffer=0.0, rest_exit="ema20", failed_breakout_exit=False)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_19():
+def test_default_rules_are_version_20():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
@@ -71,6 +71,7 @@ def test_default_rules_are_version_19():
     assert not rules.sticky_stop and rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
     assert rules.breakeven_exit and (rules.rest_exit, rules.sma_exit_buffer) == ("sma50", 0.03)
     assert not rules.failed_breakout_exit
+    assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev"
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
@@ -394,3 +395,50 @@ def test_close_entry_buys_next_open_when_setup_shows_on_the_buy_bar():
     trade = trades.iloc[0]
     assert trade["entry_date"] == dates[3] and trade["entry_price"] == 104  # next day's open
     assert trade["entry_kind"] == "setup-close"
+
+
+def test_breakeven_exit_waits_for_a_close_3pct_below_entry():
+    closes = [100, 100, 100, 109, 104, 99.5, 90, 80]
+    ema = [101, 101, 101, 112, 112, 112, 112, 112]  # the rest-exit line never arms
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
+    rules = basic_rules(cost=0.0, breakeven_exit=True, breakeven_buffer=0.03)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    # 99.5 is only 0.5% below the entry: hold. 90 is 10% below: sell at the next open.
+    assert trades.iloc[0]["exits"].split("; ")[1] == f"{dates[7].date()} breakeven 100@80.00"
+
+
+def test_live_entry_buys_where_the_squeeze_shows_on_the_way_up():
+    closes = [100, 100, 100, 104, 105, 106]
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["setup"] = False  # no squeeze / red bar at any close before the BUY day
+    sig["trend"] = [-1, -1, 1, 1, 1, 1]
+    sig["flip_level"] = [np.nan, np.nan, 100.5, np.nan, np.nan, np.nan]
+    sig["touch_price"] = [np.nan, np.nan, 100.8, np.nan, np.nan, np.nan]  # squeeze shows at 100.8
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True))
+    assert trades.empty  # old rule: no setup at the previous close, no order
+    rules = basic_rules(cost=0.0, entry_on_touch=True, entry_check="live")
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    trade = trades.iloc[0]
+    assert (trade["entry_date"], trade["entry_price"], trade["entry_kind"]) == (dates[2], 100.8, "setup-live")
+    sig["touch_price"] = np.nan  # the squeeze never shows that day: no buy
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.empty
+
+
+def test_live_squeeze_reading_matches_the_end_of_day_bar():
+    # Walking the price up to the real close (low = open) must give the end-of-day values.
+    rng = np.random.default_rng(3)
+    close = series(100 + rng.normal(scale=1.0, size=80).cumsum())
+    open_ = close.shift(1).fillna(close.iloc[0]) + rng.normal(scale=0.3, size=80)
+    high = np.maximum(open_, close) + 0.5
+    low = np.minimum(open_, close) - 0.5
+    day = close.index[60]
+    open_[day] = close[day] - 2.0
+    high[day], low[day] = close[day], open_[day]
+    level = pd.Series(np.nan, index=close.index)
+    level[day] = close[day]
+    live = signals.at_touch(open_, high, low, close, level).loc[day]
+    full = signals.squeeze(high, low, close).loc[day]
+    assert bool(live["touch_squeeze"]) == bool(full["squeeze_on"])
+    assert live["touch_momentum"] == pytest.approx(full["momentum"])
