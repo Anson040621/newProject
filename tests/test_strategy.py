@@ -456,3 +456,36 @@ def test_reentry_only_while_in_the_top_n():
     assert len(trades) == 1  # outside the top 10 that evening: no re-entry
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_top=20))
     assert list(trades["entry_date"]) == [dates[2], dates[7]]
+
+
+def no_line_world():
+    """Bought at the flip level (100.5) on day 2; the day closes back below it: no green line."""
+    closes = [100, 100, 100, 99, 95, 90, 90]
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["setup"] = [False, True, False, False, False, False, False]
+    sig["trend"] = -1
+    sig["flip_level"] = [np.nan, np.nan, 100.5, 100.5, 100.5, 100.5, 100.5]
+    return dates, prices, sigs, top
+
+
+def test_no_line_stop_caps_the_loss_while_there_is_no_green_line():
+    dates, prices, sigs, top = no_line_world()
+    rules = basic_rules(cost=0.0, entry_on_touch=True, no_line_stop=0.06)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    # Day 4: low 94.05 reaches 100.5 x 0.94 = 94.47 -> sold there (no green line, no other stop).
+    assert trades.iloc[0]["exits"] == f"{dates[4].date()} no-line-stop 149@94.47"
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True))
+    assert "open at end" in trades.iloc[0]["exits"]  # without it: nothing sells
+
+
+def test_no_line_stop_keep_stays_after_the_green_line_appears():
+    dates, prices, sigs, top = no_line_world()
+    sigs["AAA"]["trend"] = [-1, -1, -1, 1, 1, 1, 1]  # the trend turns up on day 3
+    sigs["AAA"]["atr_stop"] = [np.nan] * 4 + [90.0, 90.0, 90.0]  # green line from day 4, far below
+    rules = basic_rules(cost=0.0, entry_on_touch=True, no_line_stop=0.06)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert "no-line-stop" not in trades.iloc[0]["exits"]  # a green line exists from day 4: cap off
+    rules = basic_rules(cost=0.0, entry_on_touch=True, no_line_stop=0.06, no_line_stop_keep=True)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"] == f"{dates[4].date()} no-line-stop 149@94.47"

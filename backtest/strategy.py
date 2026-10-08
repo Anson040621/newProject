@@ -31,6 +31,10 @@ Rules (defaults = version #20 = #19 with a 3% cushion on the break-even exit):
           price, on the way up through the line, at which the squeeze is on and the
           bar is red (as the indicators read live). --entry-check either: the old
           order (setup at the previous close) or the live check.
+  Option --no-line-stop X: before +8%, while a trade has no green line (from the
+          moment it is bought), sell everything at -X from the entry;
+          --no-line-stop-keep keeps that cap until +8% for trades whose entry day
+          closed back below the flip line, even after a green line appears.
   Option --close-entry: when the whole setup (squeeze on, red bar, ATR flips to
           BUY) only shows on the BUY bar itself - so no buy-stop was waiting - buy at
           the next open.
@@ -70,6 +74,8 @@ class Rules:
     atr_exit_on_touch: bool = True  # before +8%: sell the moment price touches the ATR stop (see buffer)
     entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
+    no_line_stop: float = 0.0  # before +8%: hard stop at -X from entry while there is no green line (0 = off)
+    no_line_stop_keep: bool = False  # ... kept until +8% when the entry day closed back below the flip line
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
@@ -104,6 +110,7 @@ class Position:
     closes_below_ema: int = 0  # consecutive closes below that line
     days_without_price: int = 0
     intraday_entry: bool = False
+    no_line_entry: bool = False  # the entry day closed back below the flip level: no green line the next day
     stop_line: float = float("nan")  # green line the intraday stop is based on
     reentry: bool = False
     kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
@@ -257,6 +264,23 @@ def run(
                 sell(pos, pos.shares, fill, day, "emergency-stop")
                 close_out(pos, day)
 
+        # 2'. No-line cap: before +8%, while the position has no green line (from the moment
+        #     it is bought), sell everything at -X% from the entry (at the open if it gaps below).
+        if rules.no_line_stop:
+            for pos in list(positions.values()):
+                no_line = pd.isna(signals[pos.ticker].at[day, "atr_stop"])
+                if pos.tp_taken or not (no_line or (rules.no_line_stop_keep and pos.no_line_entry)):
+                    continue
+                stop = pos.entry_price * (1 - rules.no_line_stop)
+                low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
+                if pos.intraday_entry and pos.entry_date == day:
+                    low = px(pos.ticker, day, "close")  # as for the hard stop: only the close proves it
+                if low is None or low > stop:
+                    continue
+                fill = min(stop, open_) if open_ is not None and day != pos.entry_date else stop
+                sell(pos, pos.shares, fill, day, "no-line-stop")
+                close_out(pos, day)
+
         # 2a. Intraday ATR stop: before +8%, sell everything the moment the price touches
         #     the stop (buffer below yesterday's green line), at the open if it gaps below.
         if rules.atr_exit_on_touch:
@@ -311,6 +335,8 @@ def run(
             else:
                 rest_line, closes_needed = sig.at[day, "ema20"], rules.ema_exit_days
             pos.closes_below_ema = pos.closes_below_ema + 1 if close < rest_line else 0
+            if pos.intraday_entry and pos.entry_date == day:
+                pos.no_line_entry = sig.at[day, "trend"] != 1
             if (rules.failed_breakout_exit and pos.intraday_entry and pos.entry_date == day
                     and sig.at[day, "trend"] != 1 and pos.shares > 0):
                 # Bought on the touch of the flip level, but the day closed back below it:
