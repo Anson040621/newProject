@@ -468,3 +468,42 @@ def test_rest_exit_waits_until_a_month_after_entry():
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     # Below the line on day 6 (only 4 days after entry): no sale; still below on day 7 -> next open.
     assert trades.iloc[0]["exits"].split("; ")[1] == f"{dates[8].date()} exit 100@105.00"
+
+
+def test_long_line_is_the_green_line_on_the_flip_bar():
+    close = series([100.0] * 30 + [105.0] * 11 + [99.0] * 5)
+    trail = signals.atr_trail(close + 0.5, close - 0.5, close)
+    assert trail["long_line"].iloc[30] == trail["trail"].iloc[30]  # flips up on bar 30
+    assert trail["long_line"].iloc[20:30].notna().all()  # known in the down-trend too
+
+
+def frozen_world():
+    """Bought at the flip level (100.5) on day 2; the day closes back below it: no green line."""
+    closes = [100, 100, 100, 99, 95, 90, 90]
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["setup"] = [False, True, False, False, False, False, False]
+    sig["trend"] = -1
+    sig["flip_level"] = [np.nan, np.nan, 100.5, 100.5, 100.5, 100.5, 100.5]
+    sig["long_line"] = [90.0, 90.0, 96.0, 95.0, 92.0, 88.0, 88.0]  # day 2 would have had 96
+    return dates, prices, sigs, top
+
+
+def test_frozen_line_stops_a_no_line_entry():
+    dates, prices, sigs, top = frozen_world()
+    rules = basic_rules(cost=0.0, entry_on_touch=True, atr_exit_on_touch=True, atr_stop_buffer=0.02)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert "open at end" in trades.iloc[0]["exits"]  # no green line, no stop: held all the way down
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(
+        cost=0.0, entry_on_touch=True, atr_exit_on_touch=True, atr_stop_buffer=0.02, frozen_line=True))
+    # Frozen at 96 (not 95 or 92 later): stop 96 x 0.98 = 94.08; day 4 low 94.05 touches it.
+    assert trades.iloc[0]["exits"] == f"{dates[4].date()} no-line-stop 149@94.08"
+
+
+def test_frozen_line_hands_over_to_the_real_green_line_on_a_breakout():
+    dates, prices, sigs, top = frozen_world()
+    sigs["AAA"]["trend"] = [-1, -1, -1, 1, 1, 1, 1]  # closes above the flip line on day 3
+    sigs["AAA"]["atr_stop"] = [np.nan] * 4 + [85.0, 85.0, 85.0]  # the real green line, from day 4
+    rules = basic_rules(cost=0.0, entry_on_touch=True, atr_exit_on_touch=True, atr_stop_buffer=0.02, frozen_line=True)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert "no-line-stop" not in trades.iloc[0]["exits"]  # day 4 dip to 94.05 is far above 85 x 0.98

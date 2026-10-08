@@ -32,6 +32,10 @@ Rules (defaults = version #21 = #20 with the 50-day exit switched on one month a
           price, on the way up through the line, at which the squeeze is on and the
           bar is red (as the indicators read live). --entry-check either: the old
           order (setup at the previous close) or the live check.
+  Option --frozen-line: when the buy day closes back below the flip line (no green
+          line), the green line that day would have had is frozen and used like a
+          normal green line (2% stop below it, sell after a close below it) until
+          the trend really turns up; then the real green line takes over.
   Option --close-entry: when the whole setup (squeeze on, red bar, ATR flips to
           BUY) only shows on the BUY bar itself - so no buy-stop was waiting - buy at
           the next open.
@@ -82,6 +86,7 @@ class Rules:
     breakeven_buffer: float = 0.03  # ... more than this far below the entry (0.03 = a close 3% below it)
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
+    frozen_line: bool = False  # no-line entries: the green line the buy day would have had is a fixed stop
     rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
     entry_check: str = "prev"  # when the squeeze / red bar must show: "prev" close, "live" as the price
@@ -107,6 +112,7 @@ class Position:
     days_without_price: int = 0
     intraday_entry: bool = False
     entry_day: int = 0  # trading-day number of the entry
+    frozen_line: float = float("nan")  # fixed stand-in for the green line while there is none (frozen_line)
     stop_line: float = float("nan")  # green line the intraday stop is based on
     reentry: bool = False
     kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
@@ -266,6 +272,9 @@ def run(
         if rules.atr_exit_on_touch:
             for pos in list(positions.values()):
                 line = signals[pos.ticker].at[day, "atr_stop"]
+                frozen = pd.isna(line) and pd.notna(pos.frozen_line)
+                if frozen:
+                    line = pos.frozen_line  # no green line yet: the one the buy day would have had
                 if not rules.sticky_stop:
                     pos.stop_line = line
                 elif pd.notna(line):
@@ -275,7 +284,7 @@ def run(
                 if pos.tp_taken or pd.isna(stop) or low is None or low > stop:
                     continue
                 fill = min(stop, open_) if open_ is not None and day != pos.entry_date else stop
-                sell(pos, pos.shares, fill, day, "atr-stop")
+                sell(pos, pos.shares, fill, day, "no-line-stop" if frozen else "atr-stop")
                 close_out(pos, day)
 
         # 2b. Intraday: take 1/3 profit when the high reaches +8%.
@@ -315,6 +324,12 @@ def run(
             else:
                 rest_line, closes_needed = sig.at[day, "ema20"], rules.ema_exit_days
             pos.closes_below_ema = pos.closes_below_ema + 1 if close < rest_line else 0
+            if rules.frozen_line and pos.intraday_entry and pos.entry_date == day and sig.at[day, "trend"] != 1:
+                # Bought on the touch, but the day closed back below the flip line: no green line.
+                # Freeze the line the day would have had, had it closed above (until a real one shows).
+                pos.frozen_line = sig.at[day, "long_line"]
+            elif sig.at[day, "trend"] == 1:
+                pos.frozen_line = float("nan")  # broke out: the real green line takes over tomorrow
             if (rules.failed_breakout_exit and pos.intraday_entry and pos.entry_date == day
                     and sig.at[day, "trend"] != 1 and pos.shares > 0):
                 # Bought on the touch of the flip level, but the day closed back below it:
@@ -326,6 +341,9 @@ def run(
                 # sits below the line, so a close can land between the two.
                 if (rules.close_exit or not rules.atr_exit_on_touch) and bool(sig.at[day, "atr_exit"]):
                     pending_exits[pos.ticker] = "exit"
+                elif ((rules.close_exit or not rules.atr_exit_on_touch) and pd.notna(pos.frozen_line)
+                        and day != pos.entry_date and close < pos.frozen_line):
+                    pending_exits[pos.ticker] = "no-line-exit"  # a close below the frozen line
             elif (pos.armed and pos.closes_below_ema >= closes_needed
                   and day_number - pos.entry_day >= rules.rest_exit_delay):
                 pending_exits[pos.ticker] = "exit"

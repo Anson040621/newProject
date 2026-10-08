@@ -99,6 +99,9 @@ def main(argv=None):
     parser.add_argument("--rest-exit", choices=["sma50", "ema20"], default=defaults.rest_exit,
                         help="after +8%%: sma50 = close more than --sma-exit-buffer below the 50 SMA (default); "
                              "ema20 = --ema-exit-days closes in a row below the 20 EMA")
+    parser.add_argument("--frozen-line", action=argparse.BooleanOptionalAction, default=defaults.frozen_line,
+                        help="no-line entries: use the green line the buy day would have had as a fixed stop "
+                             "until the trend turns up (default off)")
     parser.add_argument("--rest-exit-delay", type=int, default=defaults.rest_exit_delay,
                         help="after +8%%: the 50 SMA exit only from this many trading days after the entry "
                              "(default 21 = about a month; 0 = from the start, version #20)")
@@ -147,7 +150,7 @@ def main(argv=None):
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
-        rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
+        rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     dates, prices, sigs, top = prepare(args.start, args.end, max(args.top, args.reentry_top), not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None

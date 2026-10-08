@@ -87,11 +87,13 @@ def atr_trail(high: pd.Series, low: pd.Series, close: pd.Series,
     n = len(c)
     trend = np.zeros(n, dtype=int)
     trail = np.full(n, np.nan)
+    long_line = np.full(n, np.nan)  # the green line this bar has, or would have if the trend turned up here
     long_trail = short_trail = np.nan  # values at the end of the previous bar
     prev_trend = 0
     for i in range(n):
         lt = long_stop[i] if np.isnan(long_trail) else (long_stop[i] if long_stop[i] > long_trail else long_trail)
         st = short_stop[i] if np.isnan(short_trail) else (short_stop[i] if short_stop[i] < short_trail else short_trail)
+        long_line[i] = lt
         if c[i] > short_trail:
             t = 1
         elif c[i] < long_trail:
@@ -111,6 +113,7 @@ def atr_trail(high: pd.Series, low: pd.Series, close: pd.Series,
             "atr_buy": (trend == 1) & (previous != 1),
             "atr_exit": (trend == -1) & (previous == 1),
             "trail": trail,
+            "long_line": long_line,
         },
         index=close.index,
     )
