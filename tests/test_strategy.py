@@ -442,3 +442,17 @@ def test_live_squeeze_reading_matches_the_end_of_day_bar():
     full = signals.squeeze(high, low, close).loc[day]
     assert bool(live["touch_squeeze"]) == bool(full["squeeze_on"])
     assert live["touch_momentum"] == pytest.approx(full["momentum"])
+
+
+def test_reentry_only_while_in_the_top_n():
+    closes = [100, 100, 100, 97, 96, 99, 101, 102, 103, 104]
+    exits = [False, False, False, True, False, False, False, False, False, False]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
+    sigs["AAA"]["atr_buy"] = [False] * 6 + [True] + [False] * 3  # flips back on day 6
+    top.loc[6, "rank"] = 15  # ranked #15 on the evening of the flip
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5))
+    assert len(trades) == 2  # no requirement: re-bought on day 7
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_top=10))
+    assert len(trades) == 1  # outside the top 10 that evening: no re-entry
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_top=20))
+    assert list(trades["entry_date"]) == [dates[2], dates[7]]

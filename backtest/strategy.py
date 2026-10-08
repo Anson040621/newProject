@@ -25,7 +25,7 @@ Rules (defaults = version #20 = #19 with a 3% cushion on the break-even exit):
                       close at the entry = version #19, --no-breakeven-exit = off).
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days of the exit: buy-stop at the flip level (no other
-          conditions).
+          conditions; --reentry-top N: only while the stock is in the top N).
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -71,6 +71,7 @@ class Rules:
     entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
+    reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
     atr_stop_buffer: float = 0.02  # with atr_exit_on_touch: stop this far below the trail line (0.02 = 2%)
     sticky_stop: bool = False  # keep the last stop when the green line disappears; never lower it
@@ -132,8 +133,9 @@ def run(
              open-to-close returns.
     Returns the daily equity curve and the trade log.
     """
-    top = top[(top["rank"] <= rules.top_n) & (top["sctr"] > rules.min_sctr)]
-    top_by_day = {d: g.sort_values("rank") for d, g in top.groupby("date")}
+    top = top[(top["rank"] <= max(rules.top_n, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
+    top_by_day = {d: g[g["rank"] <= rules.top_n].sort_values("rank") for d, g in top.groupby("date")}
+    reentry_ok = {d: set(g.loc[g["rank"] <= rules.reentry_top, "ticker"]) for d, g in top.groupby("date")}
 
     cash = rules.capital
     positions: dict[str, Position] = {}
@@ -361,9 +363,11 @@ def run(
             sig = signals[ticker]
             if ticker in positions:
                 continue
+            # With reentry_top: no order tonight unless the stock is in the top N (the window keeps running).
+            listed = not rules.reentry_top or ticker in reentry_ok.get(day, ())
             # Shaken out: the intraday stop sold us, but the close is still in an
             # up-trend (it never flipped to SELL) -> buy back at the next open.
-            if (rules.rebuy_shakeouts and how == "atr-stop" and sig.at[day, "trend"] == 1
+            if (rules.rebuy_shakeouts and listed and how == "atr-stop" and sig.at[day, "trend"] == 1
                     and day_number - exit_day <= rules.reentry_days):
                 pending_entries.append((ticker, sctr, "reentry"))
                 del early_exits[ticker]
@@ -371,11 +375,11 @@ def run(
             if rules.entry_on_touch:
                 if day_number + 1 - exit_day > rules.reentry_days:
                     del early_exits[ticker]
-                elif sig.at[day, "trend"] != 1:
+                elif listed and sig.at[day, "trend"] != 1:
                     candidates.insert(0, (ticker, sctr, "reentry"))
             elif day_number - exit_day > rules.reentry_days:
                 del early_exits[ticker]
-            elif bool(sig.at[day, "atr_buy"]):
+            elif listed and bool(sig.at[day, "atr_buy"]):
                 candidates.insert(0, (ticker, sctr, "reentry"))
 
         seen = set()
