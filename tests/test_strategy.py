@@ -58,12 +58,13 @@ def basic_rules(**overrides):
     """Next-open entries, 1-day EMA exit, no re-entry; each test switches on what it checks."""
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
-                    breakeven_exit=False, breakeven_buffer=0.0, rest_exit="ema20", failed_breakout_exit=False)
+                    breakeven_exit=False, breakeven_buffer=0.0, rest_exit="ema20", failed_breakout_exit=False,
+                    rest_exit_delay=0)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_20():
+def test_default_rules_are_version_21():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
@@ -71,7 +72,7 @@ def test_default_rules_are_version_20():
     assert not rules.sticky_stop and rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
     assert rules.breakeven_exit and (rules.rest_exit, rules.sma_exit_buffer) == ("sma50", 0.03)
     assert not rules.failed_breakout_exit
-    assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev"
+    assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev" and rules.rest_exit_delay == 21
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
@@ -456,3 +457,14 @@ def test_reentry_only_while_in_the_top_n():
     assert len(trades) == 1  # outside the top 10 that evening: no re-entry
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_top=20))
     assert list(trades["entry_date"]) == [dates[2], dates[7]]
+
+
+def test_rest_exit_waits_until_a_month_after_entry():
+    # MSTR, Sep 2024: +8% on the buy day, then a dip below the 50-day line two days later.
+    closes = [100, 100, 100, 109, 112, 107.8, 106.15, 106, 105, 104]
+    dates, prices, sigs, top = make_world(closes, entry_day=1)  # bought day 2
+    sigs["AAA"]["sma50"] = 110.0  # sell line 110 x 0.97 = 106.70
+    rules = basic_rules(cost=0.0, rest_exit="sma50", sma_exit_buffer=0.03, rest_exit_delay=5)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    # Below the line on day 6 (only 4 days after entry): no sale; still below on day 7 -> next open.
+    assert trades.iloc[0]["exits"].split("; ")[1] == f"{dates[8].date()} exit 100@105.00"

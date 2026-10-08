@@ -1,6 +1,6 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #20 = #19 with a 3% cushion on the break-even exit):
+Rules (defaults = version #21 = #20 with the 50-day exit switched on one month after entry):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
   Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
           crosses), the momentum bar is red and the 2x ATR trail is in a
@@ -19,7 +19,8 @@ Rules (defaults = version #20 = #19 with a 3% cushion on the break-even exit):
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
           after +8%:  sell the rest at the next open after a close more than 3%
                       below the 50-day SMA, once price has closed above that level
-                      since entry (--rest-exit ema20 for the old rule: 3 closes in
+                      since entry and from 21 trading days after the entry or
+                      re-entry on (--rest-exit-delay; 0 = from the start) (--rest-exit ema20 for the old rule: 3 closes in
                       a row below the 20 EMA), or after a close more than 3% below
                       the entry price (break-even exit, --breakeven-buffer 0 for a
                       close at the entry = version #19, --no-breakeven-exit = off).
@@ -81,6 +82,7 @@ class Rules:
     breakeven_buffer: float = 0.03  # ... more than this far below the entry (0.03 = a close 3% below it)
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
+    rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
     entry_check: str = "prev"  # when the squeeze / red bar must show: "prev" close, "live" as the price
     #                            crosses the flip line, or "either" (see the module docstring)
@@ -104,6 +106,7 @@ class Position:
     closes_below_ema: int = 0  # consecutive closes below that line
     days_without_price: int = 0
     intraday_entry: bool = False
+    entry_day: int = 0  # trading-day number of the entry
     stop_line: float = float("nan")  # green line the intraday stop is based on
     reentry: bool = False
     kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
@@ -191,7 +194,8 @@ def run(
         paid = shares * price * (1 + rules.cost)
         cash -= paid * (1 + park_cost)
         positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid,
-                                     intraday_entry=intraday, reentry=kind == "reentry", kind=kind)
+                                     intraday_entry=intraday, reentry=kind == "reentry", kind=kind,
+                                     entry_day=day_number)
         early_exits.pop(ticker, None)
         entered_today.add(ticker)
         if kind.startswith("setup"):
@@ -322,7 +326,8 @@ def run(
                 # sits below the line, so a close can land between the two.
                 if (rules.close_exit or not rules.atr_exit_on_touch) and bool(sig.at[day, "atr_exit"]):
                     pending_exits[pos.ticker] = "exit"
-            elif pos.armed and pos.closes_below_ema >= closes_needed:
+            elif (pos.armed and pos.closes_below_ema >= closes_needed
+                  and day_number - pos.entry_day >= rules.rest_exit_delay):
                 pending_exits[pos.ticker] = "exit"
             elif rules.breakeven_exit and close <= pos.entry_price * (1 - rules.breakeven_buffer):
                 pending_exits[pos.ticker] = "breakeven"  # gave back the whole gain

@@ -102,7 +102,7 @@ folder.
 from "SEPA", and the "2x ATR Trailing Exit"); `backtest/strategy.py` simulates
 the portfolio day by day.
 
-The defaults are the current rule set ("version #20" = #19 with a 3% cushion on the break-even exit):
+The defaults are the current rule set ("version #21" = #19 with a 3% cushion on the break-even exit and the 50-day exit switched on one month after entry):
 
 | Rule | Default |
 |---|---|
@@ -112,14 +112,14 @@ The defaults are the current rule set ("version #20" = #19 with a 3% cushion on 
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
 | Exit before +8% | a) a close below the green ATR line (SELL label): everything at the next open; b) safety net: the price touches 2% below the previous close's green line (`--atr-stop-buffer`): everything at once, at the open if it gaps below |
 | Take profit | 1/3 at +8% (`--take-profit`), intraday |
-| Exit after +8% | the rest at the next open after a close more than 3% below the 50-day SMA (`--sma-exit-buffer`), once price has closed above that level (`--rest-exit ema20` for the old rule: 3 closes below the 20 EMA), or after a close more than 3% below the entry price (break-even exit, `--breakeven-buffer`, `--no-breakeven-exit` to turn off) |
+| Exit after +8% | the rest at the next open after a close more than 3% below the 50-day SMA (`--sma-exit-buffer`), once price has closed above that level and from 21 trading days after the entry or re-entry (`--rest-exit-delay`, 0 = at once) (`--rest-exit ema20` for the old rule: 3 closes below the 20 EMA), or after a close more than 3% below the entry price (break-even exit, `--breakeven-buffer`, `--no-breakeven-exit` to turn off) |
 | Re-entry | after an exit before +8%, if the ATR flips back to BUY within 5 trading days of the exit, buy-stop at the flip level, at any SCTR rank (`--reentry-days`, 0 = off; `--reentry-top N` to require the top N) |
 | Costs | 0.1% per buy and per sell (`--cost`) |
 | Tested alternatives | `--reentry-top 10` / `20` (re-entries only while the stock is in the daily top 10 / 20: 11.1% / 10.8% a year, worst drop -25.1% / -25.2%, vs 11.4% and -26.3% without the requirement), `--entry-check live` (a buy order waits at the flip level for every top-10 stock in an ATR down-trend; it buys at the first price on the way up through the line where the squeeze is on and the bar red, as the indicators read live: 12.2% a year, worst drop -28.1%, profit factor 1.78 with the break-even exit at the entry; 11.7% / -30.5% with the 3% cushion), `--entry-check either` (11.7% / -29.0% at the entry, 11.1% / -31.3% with the cushion), `--close-entry` (also buy at the next open when the squeeze, red bar and ATR flip to BUY all appear on the same bar, e.g. HOOD 9 Apr 2025: 11.9% a year but worst drop -36.8% and profit factor 1.64; the 89 extra trades lost $41k, 43% winners), `--atr-stop-buffer` 0 / 0.03 / 0.05 (safety net on the line / 3% / 5% below it: 10.0% / 11.3% / 11.3% a year, the 5% one is version #17), `--dim-green-days 42` (within about 2 months of a full-setup entry we have exited, also buy the same setup with a dim green momentum bar: 12.3% a year, worst drop -26.3%, but only 7 extra trades and most of the gain is one trade, WDC Apr 2026), `--failed-breakout-exit` (sell at the next open when the entry day closes back below the flip level: 5.4% a year), `--emergency-stop 0.12` on #17 (6.6% a year), `--entry-buffer 0.02`, `--no-close-exit --sticky-stop --atr-stop-buffer 0.03` (#14), `--emergency-stop 0.12` (#15), `--no-atr-exit-on-touch --atr-stop-buffer 0` (version G), `--park QQQ`, `--rebuy-shakeouts` |
 
-2015-01-02 to 2026-10-02 with the defaults (#20): $100k -> $356k (11.4% a year,
-worst drawdown -26%, 304 trades, 43% winners, profit factor 1.82) vs SPY 13.8% a
-year. #19 (break-even exit at the entry, `--breakeven-buffer 0`): $375k (11.9%,
+2015-01-02 to 2026-10-02 with the defaults (#21): $100k -> $347k (11.2% a year,
+worst drawdown -27.5%, 302 trades, 42% winners, profit factor 1.82) vs SPY 13.8% a
+year. #20 (50-day exit from the start, `--rest-exit-delay 0`): $356k (11.4%, -26%). #19 (break-even exit at the entry, `--breakeven-buffer 0`): $375k (11.9%,
 -24%, profit factor 1.88). #17 (5% safety net): $352k (11.3%, -26%). #16 (20 EMA exit): $258k (8.4%, -22%); #13 (no break-even exit): $289k (9.5%, -26%).
 #14 (+2% entry, stop-only exit) returned 1.0% a year and #15 (#14 + 12% hard
 stop) -0.9%: the +2% entry skipped 7 of the 12 biggest winners.
