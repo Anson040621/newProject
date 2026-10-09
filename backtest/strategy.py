@@ -42,6 +42,9 @@ Rules (defaults = version #21 = #20 with the 50-day exit switched on one month a
   Option --dim-green-days N: for N trading days after an entry on the full
           setup (42 = about 2 months), once we have sold, the same setup with a
           dim green momentum bar (above zero, not rising) also counts.
+  Option --extra-slots N: also trade the setup on any stock with an SCTR above 90
+          outside the top 10, at most N such positions at a time (their re-entries
+          count too). The top 10 go first when signals arrive on the same day.
   Costs   0.1% of the traded value on every buy and sell (commission + slippage).
 
 Tested alternatives (options): --entry-buffer 0.02 (buy-stop 2% above the flip),
@@ -77,6 +80,7 @@ class Rules:
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
+    extra_slots: int = 0  # also buy stocks above min_sctr outside the top N, at most this many at a time (0 = off)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
     atr_stop_buffer: float = 0.02  # with atr_exit_on_touch: stop this far below the trail line (0.02 = 2%)
     sticky_stop: bool = False  # keep the last stop when the green line disappears; never lower it
@@ -116,6 +120,7 @@ class Position:
     stop_line: float = float("nan")  # green line the intraday stop is based on
     reentry: bool = False
     kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
+    extra: bool = False  # bought from outside the top N (extra_slots), or a re-entry of such a trade
     proceeds: float = 0.0  # cash received from sales so far (after costs)
     cost_basis: float = 0.0  # cash paid at entry (incl. costs)
     fills: list = field(default_factory=list)
@@ -142,8 +147,9 @@ def run(
              open-to-close returns.
     Returns the daily equity curve and the trade log.
     """
-    top = top[(top["rank"] <= max(rules.top_n, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
-    top_by_day = {d: g[g["rank"] <= rules.top_n].sort_values("rank") for d, g in top.groupby("date")}
+    listed = 10**9 if rules.extra_slots else rules.top_n  # extra_slots: every stock above min_sctr
+    top = top[(top["rank"] <= max(listed, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
+    top_by_day = {d: g[g["rank"] <= listed].sort_values("rank") for d, g in top.groupby("date")}
     reentry_ok = {d: set(g.loc[g["rank"] <= rules.reentry_top, "ticker"]) for d, g in top.groupby("date")}
 
     cash = rules.capital
@@ -154,6 +160,8 @@ def run(
     early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
     setup_entries: dict[str, int] = {}  # ticker -> day number of the last full-setup entry
     entered_today: set[str] = set()
+    extra_orders: set[str] = set()  # tonight's orders that count against extra_slots
+    extra_tickers: set[str] = set()  # tickers whose last trade did (so their re-entries do too)
     last_close: dict[str, float] = {}
     equity = pd.Series(np.nan, index=dates)
     trades = []
@@ -179,6 +187,7 @@ def run(
             "sctr_at_signal": pos.sctr,
             "reentry": pos.reentry,
             "entry_kind": pos.kind,
+            "extra": pos.extra,
             "exit_date": day,
             "exits": "; ".join(f"{d.date()} {r} {s}@{p:.2f}" for d, r, s, p in pos.fills),
             "took_profit": pos.tp_taken,
@@ -194,6 +203,9 @@ def run(
         nonlocal cash
         if len(positions) >= rules.max_positions or ticker in positions:
             return False
+        extra = ticker in extra_orders
+        if extra and sum(p.extra for p in positions.values()) >= rules.extra_slots:
+            return False
         shares = math.floor(rules.position_size * prev_equity / (price * (1 + rules.cost)))
         if shares <= 0 or shares * price * (1 + rules.cost) * (1 + park_cost) > cash:
             return False
@@ -201,7 +213,8 @@ def run(
         cash -= paid * (1 + park_cost)
         positions[ticker] = Position(ticker, day, price, shares, shares, sctr, cost_basis=paid,
                                      intraday_entry=intraday, reentry=kind == "reentry", kind=kind,
-                                     entry_day=day_number)
+                                     entry_day=day_number, extra=extra)
+        (extra_tickers.add if extra else extra_tickers.discard)(ticker)
         early_exits.pop(ticker, None)
         entered_today.add(ticker)
         if kind.startswith("setup"):
@@ -414,6 +427,12 @@ def run(
             if order[0] not in seen:
                 seen.add(order[0])
                 pending_entries.append(order)
+        # extra_slots: orders for stocks outside the top N, and re-entries of such trades.
+        extra_orders.clear()
+        if rules.extra_slots and today is not None:
+            outside = set(today.loc[today["rank"] > rules.top_n, "ticker"])
+            extra_orders.update(t for t, _, kind in touch_orders + pending_entries
+                                if (t in extra_tickers if kind == "reentry" else t in outside))
 
         prev_equity = cash + sum(p.shares * last_close.get(p.ticker, p.entry_price) for p in positions.values())
         equity[day] = prev_equity

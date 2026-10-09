@@ -459,6 +459,22 @@ def test_reentry_only_while_in_the_top_n():
     assert list(trades["entry_date"]) == [dates[2], dates[7]]
 
 
+def test_extra_slots_for_stocks_outside_the_top_n():
+    # Three stocks signal on the same day, ranked #1, #15 and #20 (all SCTR above 90).
+    dates, prices, sigs, top = make_world([100] * 5, entry_day=1)
+    ranks = {"T0": 1, "T1": 15, "T2": 20}
+    prices = {t: prices["AAA"] for t in ranks}
+    sigs = {t: sigs["AAA"] for t in ranks}
+    top = pd.concat([top.assign(ticker=t, rank=r, sctr=99.0 - r / 10) for t, r in ranks.items()])
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
+    assert list(trades["ticker"]) == ["T0"]  # the top 10 only
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, extra_slots=1))
+    assert sorted(trades["ticker"]) == ["T0", "T1"]  # one extra slot: the better ranked of the two
+    assert list(trades.sort_values("ticker")["extra"]) == [False, True]
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, extra_slots=2))
+    assert sorted(trades["ticker"]) == ["T0", "T1", "T2"]
+
+
 def test_rest_exit_waits_until_a_month_after_entry():
     # MSTR, Sep 2024: +8% on the buy day, then a dip below the 50-day line two days later.
     closes = [100, 100, 100, 109, 112, 107.8, 106.15, 106, 105, 104]

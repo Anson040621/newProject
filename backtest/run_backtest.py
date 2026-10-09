@@ -134,6 +134,8 @@ def main(argv=None):
                              "exited, also buy the same setup with a dim green momentum bar (default 0 = off)")
     parser.add_argument("--reentry-top", type=int, default=defaults.reentry_top,
                         help="re-entries only while the stock is in the daily SCTR top N (default 0 = any rank)")
+    parser.add_argument("--extra-slots", type=int, default=defaults.extra_slots,
+                        help="also trade stocks above --min-sctr outside the top N, at most this many at a time")
     parser.add_argument("--park", default=None, metavar="ETF",
                         help="keep all money not in a trade in this ETF, e.g. QQQ (default: cash)")
     parser.add_argument("--park-cost", type=float, default=defaults.park_cost,
@@ -148,11 +150,13 @@ def main(argv=None):
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
+        extra_slots=args.extra_slots,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
-    dates, prices, sigs, top = prepare(args.start, args.end, max(args.top, args.reentry_top), not args.no_squeeze)
+    ranks = 10**4 if args.extra_slots else max(args.top, args.reentry_top)
+    dates, prices, sigs, top = prepare(args.start, args.end, ranks, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
     equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park)
     spy = load_benchmark(args.start)
