@@ -167,7 +167,7 @@ def main(argv=None):
     parser.add_argument("--climax-drop", type=float, default=defaults.climax_drop,
                         help="... or a big red candle: a close this far below the previous close, e.g. 0.08 (0 = off)")
     parser.add_argument("--climax-body", type=float, default=defaults.climax_body,
-                        help="... or a close this far below the day's open, e.g. 0.06 (0 = off)")
+                        help="... or a close this far below the day's open (default 0.06; 0 = off = #24)")
     parser.add_argument("--climax-drop-atr", type=float, default=defaults.climax_drop_atr,
                         help="... or a fall from the previous close of N x the 14-day ATR, e.g. 2.5 (0 = off)")
     parser.add_argument("--market-ma", type=int, default=defaults.market_ma,
