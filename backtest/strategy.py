@@ -1,7 +1,10 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #21 = #20 with the 50-day exit switched on one month after entry):
-  Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90).
+Rules (defaults = version #22 = #21 with a 75% volatility limit on the stocks):
+  Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90),
+          skipping stocks whose volatility over the last year (252 trading days,
+          annualised) is 75% or more (--max-vol, 0 = off = version #21; --min-vol
+          skips the calmest ones).
   Entry   setup at a close: the stock is in the top 10, the squeeze is on (blue
           crosses), the momentum bar is red and the 2x ATR trail is in a
           down-trend. Next day: buy-stop at the ATR flip level (that close's
@@ -27,6 +30,7 @@ Rules (defaults = version #21 = #20 with the 50-day exit switched on one month a
   Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
           trading days of the exit: buy-stop at the flip level (no other
           conditions; --reentry-top N: only while the stock is in the top N).
+          Option --reentry-after-tp: also after the rest was sold after +8%.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -42,8 +46,6 @@ Rules (defaults = version #21 = #20 with the 50-day exit switched on one month a
   Option --dim-green-days N: for N trading days after an entry on the full
           setup (42 = about 2 months), once we have sold, the same setup with a
           dim green momentum bar (above zero, not rising) also counts.
-  Option --max-vol 75: skip stocks whose volatility over the last year (252 trading
-          days, annualised) is 75% or more (--min-vol: skip the calmest ones).
   Option --extra-slots N: also trade the setup on any stock with an SCTR above 90
           outside the top 10, at most N such positions at a time (their re-entries
           count too). The top 10 go first when signals arrive on the same day.
@@ -82,9 +84,10 @@ class Rules:
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
+    reentry_after_tp: bool = False  # ... also after exits that came after the +8% partial
     extra_slots: int = 0  # also buy stocks above min_sctr outside the top N, at most this many at a time (0 = off)
     min_vol: float = 0.0  # only stocks whose 1-year volatility (% a year, column "vol") is above this (0 = off)
-    max_vol: float = 0.0  # ... and below this (e.g. 75; 0 = off)
+    max_vol: float = 75.0  # ... and below this (0 = off)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
     atr_stop_buffer: float = 0.02  # with atr_exit_on_touch: stop this far below the trail line (0.02 = 2%)
     sticky_stop: bool = False  # keep the last stop when the green line disappears; never lower it
@@ -153,6 +156,8 @@ def run(
     """
     listed = 10**9 if rules.extra_slots else rules.top_n  # extra_slots: every stock above min_sctr
     top = top[(top["rank"] <= max(listed, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
+    if (rules.min_vol or rules.max_vol) and "vol" not in top.columns:
+        raise ValueError("min_vol / max_vol need a 'vol' column in the top table (see run_backtest.prepare)")
     if rules.min_vol:
         top = top[top["vol"] > rules.min_vol]
     if rules.max_vol:
@@ -204,7 +209,7 @@ def run(
             "days_held": (day - pos.entry_date).days,
         })
         del positions[pos.ticker]
-        if not pos.tp_taken and rules.reentry_days:
+        if rules.reentry_days and (not pos.tp_taken or rules.reentry_after_tp):
             early_exits[pos.ticker] = (day_number, pos.sctr, pos.fills[-1][1] if pos.fills else "")
 
     def buy(ticker, price, day, sctr, kind, intraday) -> bool:
@@ -402,7 +407,8 @@ def run(
                         sig.at[day, "trend"] != 1 if rules.entry_on_touch else bool(sig.at[day, "atr_buy"])):
                     candidates.append((row.ticker, row.sctr, kind))
 
-        # 5. Re-entry after an early exit: the ATR trail flips back to BUY within N days.
+        # 5. Re-entry after an early exit (or any exit with reentry_after_tp): the ATR
+        #    trail flips back to BUY within N days.
         for ticker, (exit_day, sctr, how) in list(early_exits.items()):
             sig = signals[ticker]
             if ticker in positions:

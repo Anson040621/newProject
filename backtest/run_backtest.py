@@ -143,7 +143,9 @@ def main(argv=None):
     parser.add_argument("--min-vol", type=float, default=defaults.min_vol,
                         help="only stocks whose 1-year volatility (%% a year) is above this")
     parser.add_argument("--max-vol", type=float, default=defaults.max_vol,
-                        help="only stocks whose 1-year volatility (%% a year) is below this, e.g. 75")
+                        help="only stocks whose 1-year volatility (%% a year) is below this (0 = off)")
+    parser.add_argument("--reentry-after-tp", action=argparse.BooleanOptionalAction, default=defaults.reentry_after_tp,
+                        help="also re-enter after the rest was sold after +8%%")
     parser.add_argument("--park", default=None, metavar="ETF",
                         help="keep all money not in a trade in this ETF, e.g. QQQ (default: cash)")
     parser.add_argument("--park-cost", type=float, default=defaults.park_cost,
@@ -158,7 +160,7 @@ def main(argv=None):
         take_profit=args.take_profit, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
-        extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol,
+        extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,

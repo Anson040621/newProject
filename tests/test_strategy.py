@@ -59,12 +59,12 @@ def basic_rules(**overrides):
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
                     breakeven_exit=False, breakeven_buffer=0.0, rest_exit="ema20", failed_breakout_exit=False,
-                    rest_exit_delay=0)
+                    rest_exit_delay=0, max_vol=0)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_21():
+def test_default_rules_are_version_22():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
@@ -73,6 +73,7 @@ def test_default_rules_are_version_21():
     assert rules.breakeven_exit and (rules.rest_exit, rules.sma_exit_buffer) == ("sma50", 0.03)
     assert not rules.failed_breakout_exit
     assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev" and rules.rest_exit_delay == 21
+    assert (rules.min_vol, rules.max_vol) == (0, 75) and not rules.reentry_after_tp
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
@@ -443,6 +444,24 @@ def test_live_squeeze_reading_matches_the_end_of_day_bar():
     full = signals.squeeze(high, low, close).loc[day]
     assert bool(live["touch_squeeze"]) == bool(full["squeeze_on"])
     assert live["touch_momentum"] == pytest.approx(full["momentum"])
+
+
+def test_reentry_after_the_rest_was_sold_after_take_profit():
+    #        signal  entry  +8%   above EMA   below EMA -> exit day 7   flip back on day 9
+    closes = [100, 100, 100, 109, 112, 111, 105, 104, 106, 108, 110, 111]
+    ema = [101, 101, 101] + [110] * 9
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=ema)
+    sigs["AAA"]["atr_buy"] = [False] * 9 + [True] + [False] * 2
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5))
+    assert len(trades) == 1 and trades.iloc[0]["took_profit"]  # no re-entry after a +8% trade
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_after_tp=True))
+    assert list(trades["entry_date"]) == [dates[2], dates[10]] and list(trades["reentry"]) == [False, True]
+
+
+def test_volatility_limit_needs_the_vol_column():
+    dates, prices, sigs, top = make_world([100] * 5, entry_day=1)
+    with pytest.raises(ValueError):
+        strategy.run(dates, prices, sigs, top, basic_rules(max_vol=75))
 
 
 def test_reentry_only_while_in_the_top_n():
