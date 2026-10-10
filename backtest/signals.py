@@ -187,6 +187,7 @@ def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_sq
     out = sq.join(trail)
     out["ema20"] = ema(close)
     out["sma50"] = close.rolling(50).mean()
+    out["sma100"] = close.rolling(100).mean()
     # The up-trend trail line as of the previous close: a price touching it during
     # the day is where the trend would flip (used for an intraday stop).
     out["atr_stop"] = out["trail"].where(out["trend"] == 1).shift(1)

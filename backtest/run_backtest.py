@@ -160,6 +160,10 @@ def main(argv=None):
                         help="... after a close this far above the 50-day SMA (default 0.30)")
     parser.add_argument("--climax-days", type=int, default=defaults.climax_days,
                         help="... within this many trading days before the gap down (default 10)")
+    parser.add_argument("--climax-ma", type=int, choices=[50, 100], default=defaults.climax_ma,
+                        help="... measured against the 50 or 100-day SMA (default 50)")
+    parser.add_argument("--climax-gap", type=float, default=defaults.climax_gap,
+                        help="... gap down = open at least this far below the previous low, e.g. 0.05 (default 0)")
     parser.add_argument("--market-ma", type=int, default=defaults.market_ma,
                         help="no new buys unless SPY and QQQ close above their N-day average, e.g. 200 (0 = off)")
     parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,
@@ -182,7 +186,7 @@ def main(argv=None):
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
         extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
         red_line_stop=args.red_line_stop, climax_gain=args.climax_gain, climax_stretch=args.climax_stretch,
-        climax_days=args.climax_days, market_ma=args.market_ma,
+        climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,

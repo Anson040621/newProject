@@ -487,6 +487,9 @@ def test_climax_exit_after_a_steep_run_and_a_gap_down():
     assert len(trades) == 1  # no re-entry after the climax exit
     # Day 6 opens at 142, below day 5's low (148.5): sold at day 7's open.
     assert trades.iloc[0]["exits"].endswith(f"{dates[7].date()} climax-exit 100@141.00")
+    # A gap of at least 5% is required: 142 is only 4.4% below 148.5, so no climax exit.
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, climax_gain=0.40, climax_gap=0.05))
+    assert "climax-exit" not in trades.iloc[0]["exits"]
 
 
 def test_market_filter_blocks_new_buys():

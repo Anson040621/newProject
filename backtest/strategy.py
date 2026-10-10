@@ -40,9 +40,10 @@ any exit; #22 = #21 with a 75% volatility limit on the stocks):
           order (setup at the previous close) or the live check.
   Option --climax-gain 0.40: climax exit for big winners. Once a trade has been up 40%
           (at a close) and within the last 10 trading days closed 30% or more above
-          its 50-day SMA (--climax-stretch, --climax-days: a steep, compressed run),
-          a gap down (open below the previous day's low) sells everything at the next
-          open, with no re-entry.
+          its 50-day SMA (--climax-stretch, --climax-days, --climax-ma 100 for the
+          100-day SMA: a steep, compressed run), a gap down (open below the previous
+          day's low; --climax-gap 0.05: at least 5% below it) sells everything at the
+          next open, with no re-entry.
   Option --market-ma 200: market filter - no new buys (setups or re-entries) unless
           SPY and QQQ both closed above their 200-day average that evening.
   Option --red-line-stop 0.03: while a position has no green line yet (the buy day
@@ -116,6 +117,8 @@ class Rules:
     climax_stretch: float = 0.30  # ... and closed this far above its 50-day SMA ...
     climax_days: int = 10  # ... within this many trading days: a gap down sells at the next open, no re-entry
     climax_reentry: bool = False  # ... unless this is on (the usual re-entry rule then applies)
+    climax_ma: int = 50  # the average the stretch is measured against (50 or 100-day SMA)
+    climax_gap: float = 0.0  # gap down = open at least this far below the previous day's low (0 = any)
     market_ma: int = 0  # market filter: no new buys unless SPY and QQQ close above their N-day average (0 = off)
     rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
@@ -386,10 +389,11 @@ def run(
             gap_down = False
             if rules.climax_gain:
                 pos.best_close = max(pos.best_close, close)
-                if pd.notna(sig.at[day, "sma50"]) and close >= sig.at[day, "sma50"] * (1 + rules.climax_stretch):
+                ma = sig.at[day, f"sma{rules.climax_ma}"]
+                if pd.notna(ma) and close >= ma * (1 + rules.climax_stretch):
                     pos.stretch_day = day_number
                 open_, prev_low = px(pos.ticker, day, "open"), px(pos.ticker, dates[day_number - 1], "low")
-                gap_down = open_ is not None and prev_low is not None and open_ < prev_low
+                gap_down = open_ is not None and prev_low is not None and open_ < prev_low * (1 - rules.climax_gap)
             last_close[pos.ticker] = close
             # The line the rest (after +8%) is sold on: 3% below the 50-day SMA, or the 20 EMA.
             if rules.rest_exit == "sma50" and pd.notna(sig.at[day, "sma50"]):
