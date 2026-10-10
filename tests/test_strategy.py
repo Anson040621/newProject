@@ -59,12 +59,12 @@ def basic_rules(**overrides):
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
                     breakeven_exit=False, breakeven_buffer=0.0, rest_exit="ema20", failed_breakout_exit=False,
-                    rest_exit_delay=0, max_vol=0, reentry_after_tp=False)
+                    rest_exit_delay=0, max_vol=0, reentry_after_tp=False, climax_gain=0.0)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_23():
+def test_default_rules_are_version_24():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
@@ -74,6 +74,8 @@ def test_default_rules_are_version_23():
     assert not rules.failed_breakout_exit
     assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev" and rules.rest_exit_delay == 21
     assert (rules.min_vol, rules.max_vol) == (0, 75) and rules.reentry_after_tp and not rules.red_line_stop
+    assert (rules.climax_gain, rules.climax_stretch, rules.climax_ma, rules.climax_gap, rules.climax_days) == (0.40, 0.50, 100, 0.05, 10)
+    assert not rules.climax_reentry and not rules.market_ma
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):
@@ -482,13 +484,15 @@ def test_climax_exit_after_a_steep_run_and_a_gap_down():
     sigs["AAA"]["atr_buy"] = [False, True] + [False] * 6 + [True, False]
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_after_tp=True))
     assert len(trades) == 1 and "climax-exit" not in trades.iloc[0]["exits"]  # without the rule: held
-    rules = basic_rules(cost=0.0, reentry_days=5, reentry_after_tp=True, climax_gain=0.40, climax_stretch=0.30)
+    rules = basic_rules(cost=0.0, reentry_days=5, reentry_after_tp=True, climax_gain=0.40, climax_stretch=0.30,
+                        climax_ma=50, climax_gap=0.0)
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert len(trades) == 1  # no re-entry after the climax exit
     # Day 6 opens at 142, below day 5's low (148.5): sold at day 7's open.
     assert trades.iloc[0]["exits"].endswith(f"{dates[7].date()} climax-exit 100@141.00")
     # A gap of at least 5% is required: 142 is only 4.4% below 148.5, so no climax exit.
-    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, climax_gain=0.40, climax_gap=0.05))
+    rules = basic_rules(cost=0.0, climax_gain=0.40, climax_stretch=0.30, climax_ma=50, climax_gap=0.05)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert "climax-exit" not in trades.iloc[0]["exits"]
 
 

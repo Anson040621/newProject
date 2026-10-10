@@ -155,15 +155,15 @@ def main(argv=None):
     parser.add_argument("--max-vol", type=float, default=defaults.max_vol,
                         help="only stocks whose 1-year volatility (%% a year) is below this (0 = off)")
     parser.add_argument("--climax-gain", type=float, default=defaults.climax_gain,
-                        help="climax exit once a trade has been up this much, e.g. 0.40 (0 = off)")
+                        help="climax exit once a trade has been up this much (default 0.40; 0 = off = #23)")
     parser.add_argument("--climax-stretch", type=float, default=defaults.climax_stretch,
-                        help="... after a close this far above the 50-day SMA (default 0.30)")
+                        help="... after a close this far above the --climax-ma SMA (default 0.50)")
     parser.add_argument("--climax-days", type=int, default=defaults.climax_days,
                         help="... within this many trading days before the gap down (default 10)")
     parser.add_argument("--climax-ma", type=int, choices=[50, 100], default=defaults.climax_ma,
-                        help="... measured against the 50 or 100-day SMA (default 50)")
+                        help="... measured against the 50 or 100-day SMA (default 100)")
     parser.add_argument("--climax-gap", type=float, default=defaults.climax_gap,
-                        help="... gap down = open at least this far below the previous low, e.g. 0.05 (default 0)")
+                        help="... gap down = open at least this far below the previous low (default 0.05)")
     parser.add_argument("--market-ma", type=int, default=defaults.market_ma,
                         help="no new buys unless SPY and QQQ close above their N-day average, e.g. 200 (0 = off)")
     parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,

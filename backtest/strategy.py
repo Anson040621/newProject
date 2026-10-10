@@ -1,7 +1,7 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #23 = #22 without the break-even exit and with re-entry after
-any exit; #22 = #21 with a 75% volatility limit on the stocks):
+Rules (defaults = version #24 = #23 with the climax exit; #23 = #22 without the break-even
+exit and with re-entry after any exit; #22 = #21 with a 75% volatility limit on the stocks):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90),
           skipping stocks whose volatility over the last year (252 trading days,
           annualised) is 75% or more (--max-vol, 0 = off = version #21; --min-vol
@@ -38,12 +38,12 @@ any exit; #22 = #21 with a 75% volatility limit on the stocks):
           price, on the way up through the line, at which the squeeze is on and the
           bar is red (as the indicators read live). --entry-check either: the old
           order (setup at the previous close) or the live check.
-  Option --climax-gain 0.40: climax exit for big winners. Once a trade has been up 40%
-          (at a close) and within the last 10 trading days closed 30% or more above
-          its 50-day SMA (--climax-stretch, --climax-days, --climax-ma 100 for the
-          100-day SMA: a steep, compressed run), a gap down (open below the previous
-          day's low; --climax-gap 0.05: at least 5% below it) sells everything at the
-          next open, with no re-entry.
+  Climax  exit for big winners (since #24): once a trade has been up 40% at a close
+          (--climax-gain, 0 = off = #23) and within the last 10 trading days closed
+          50% or more above its 100-day SMA (--climax-stretch, --climax-days,
+          --climax-ma: a steep, compressed run), an open at least 5% below the
+          previous day's low (--climax-gap) sells everything at the next open, with
+          no re-entry (--climax-reentry to allow it).
   Option --market-ma 200: market filter - no new buys (setups or re-entries) unless
           SPY and QQQ both closed above their 200-day average that evening.
   Option --red-line-stop 0.03: while a position has no green line yet (the buy day
@@ -113,12 +113,12 @@ class Rules:
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     frozen_line: bool = False  # no-line entries: the green line the buy day would have had is a fixed stop
     red_line_stop: float = 0.0  # no-line positions: sell this far below the previous close's red line (0 = off)
-    climax_gain: float = 0.0  # climax exit once a trade has been up this much at a close (0.40 = +40%; 0 = off) ...
-    climax_stretch: float = 0.30  # ... and closed this far above its 50-day SMA ...
+    climax_gain: float = 0.40  # climax exit once a trade has been up this much at a close (0 = off) ...
+    climax_stretch: float = 0.50  # ... and closed this far above its climax_ma-day SMA ...
     climax_days: int = 10  # ... within this many trading days: a gap down sells at the next open, no re-entry
     climax_reentry: bool = False  # ... unless this is on (the usual re-entry rule then applies)
-    climax_ma: int = 50  # the average the stretch is measured against (50 or 100-day SMA)
-    climax_gap: float = 0.0  # gap down = open at least this far below the previous day's low (0 = any)
+    climax_ma: int = 100  # the average the stretch is measured against (50 or 100-day SMA)
+    climax_gap: float = 0.05  # gap down = open at least this far below the previous day's low (0 = any)
     market_ma: int = 0  # market filter: no new buys unless SPY and QQQ close above their N-day average (0 = off)
     rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
