@@ -474,6 +474,32 @@ def test_red_line_stop_sells_a_false_breakout():
     assert trade["exits"] == f"{dates[4].date()} red-line-stop 149@95.00"
 
 
+def test_climax_exit_after_a_steep_run_and_a_gap_down():
+    #         signal entry  +20%  +40%  +50%  gap down -> sold next open; flip back later: no re-entry
+    closes = [100, 100, 100, 120, 140, 150, 142, 141, 141, 143]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=[90] * 10)
+    sigs["AAA"]["sma50"] = 100.0  # 140 and 150 are 30%+ above it: a stretched, compressed run
+    sigs["AAA"]["atr_buy"] = [False, True] + [False] * 6 + [True, False]
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_after_tp=True))
+    assert len(trades) == 1 and "climax-exit" not in trades.iloc[0]["exits"]  # without the rule: held
+    rules = basic_rules(cost=0.0, reentry_days=5, reentry_after_tp=True, climax_gain=0.40, climax_stretch=0.30)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert len(trades) == 1  # no re-entry after the climax exit
+    # Day 6 opens at 142, below day 5's low (148.5): sold at day 7's open.
+    assert trades.iloc[0]["exits"].endswith(f"{dates[7].date()} climax-exit 100@141.00")
+
+
+def test_market_filter_blocks_new_buys():
+    dates, prices, sigs, top = make_world([100, 100, 101, 102, 103], entry_day=1)
+    off = pd.Series([True, False, True, True, True], index=dates)  # SPY or QQQ below average on day 1
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, market_ma=200), market=off)
+    assert trades.empty
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, market_ma=200), market=off | True)
+    assert len(trades) == 1
+    with pytest.raises(ValueError):
+        strategy.run(dates, prices, sigs, top, basic_rules(market_ma=200))
+
+
 def test_volatility_limit_needs_the_vol_column():
     dates, prices, sigs, top = make_world([100] * 5, entry_day=1)
     with pytest.raises(ValueError):

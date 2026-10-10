@@ -38,6 +38,13 @@ any exit; #22 = #21 with a 75% volatility limit on the stocks):
           price, on the way up through the line, at which the squeeze is on and the
           bar is red (as the indicators read live). --entry-check either: the old
           order (setup at the previous close) or the live check.
+  Option --climax-gain 0.40: climax exit for big winners. Once a trade has been up 40%
+          (at a close) and within the last 10 trading days closed 30% or more above
+          its 50-day SMA (--climax-stretch, --climax-days: a steep, compressed run),
+          a gap down (open below the previous day's low) sells everything at the next
+          open, with no re-entry.
+  Option --market-ma 200: market filter - no new buys (setups or re-entries) unless
+          SPY and QQQ both closed above their 200-day average that evening.
   Option --red-line-stop 0.03: while a position has no green line yet (the buy day
           closed back below the flip line), sell everything the moment the price touches
           3% below the previous close's red line (the down-trend line it was bought at),
@@ -105,6 +112,11 @@ class Rules:
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     frozen_line: bool = False  # no-line entries: the green line the buy day would have had is a fixed stop
     red_line_stop: float = 0.0  # no-line positions: sell this far below the previous close's red line (0 = off)
+    climax_gain: float = 0.0  # climax exit once a trade has been up this much at a close (0.40 = +40%; 0 = off) ...
+    climax_stretch: float = 0.30  # ... and closed this far above its 50-day SMA ...
+    climax_days: int = 10  # ... within this many trading days: a gap down sells at the next open, no re-entry
+    climax_reentry: bool = False  # ... unless this is on (the usual re-entry rule then applies)
+    market_ma: int = 0  # market filter: no new buys unless SPY and QQQ close above their N-day average (0 = off)
     rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
     entry_check: str = "prev"  # when the squeeze / red bar must show: "prev" close, "live" as the price
@@ -131,6 +143,8 @@ class Position:
     intraday_entry: bool = False
     entry_day: int = 0  # trading-day number of the entry
     frozen_line: float = float("nan")  # fixed stand-in for the green line while there is none (frozen_line)
+    best_close: float = 0.0  # highest close since entry (climax exit)
+    stretch_day: int = -10**9  # last trading day it closed far above its 50-day SMA (climax exit)
     stop_line: float = float("nan")  # green line the intraday stop is based on
     reentry: bool = False
     kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
@@ -147,6 +161,7 @@ def run(
     top: pd.DataFrame,
     rules: Rules = Rules(),
     park: pd.DataFrame | None = None,
+    market: pd.Series | None = None,
 ) -> tuple[pd.Series, pd.DataFrame]:
     """Simulate the strategy.
 
@@ -163,6 +178,8 @@ def run(
     """
     listed = 10**9 if rules.extra_slots else rules.top_n  # extra_slots: every stock above min_sctr
     top = top[(top["rank"] <= max(listed, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
+    if rules.market_ma and market is None:
+        raise ValueError("market_ma needs the market series (True = SPY and QQQ above their average)")
     if (rules.min_vol or rules.max_vol) and "vol" not in top.columns:
         raise ValueError("min_vol / max_vol need a 'vol' column in the top table (see run_backtest.prepare)")
     if rules.min_vol:
@@ -216,7 +233,8 @@ def run(
             "days_held": (day - pos.entry_date).days,
         })
         del positions[pos.ticker]
-        if rules.reentry_days and (not pos.tp_taken or rules.reentry_after_tp):
+        climax = bool(pos.fills) and pos.fills[-1][1] == "climax-exit" and not rules.climax_reentry
+        if rules.reentry_days and (not pos.tp_taken or rules.reentry_after_tp) and not climax:
             early_exits[pos.ticker] = (day_number, pos.sctr, pos.fills[-1][1] if pos.fills else "")
 
     def buy(ticker, price, day, sctr, kind, intraday) -> bool:
@@ -365,6 +383,13 @@ def run(
                     pending_exits.pop(pos.ticker, None)
                 continue
             pos.days_without_price = 0
+            gap_down = False
+            if rules.climax_gain:
+                pos.best_close = max(pos.best_close, close)
+                if pd.notna(sig.at[day, "sma50"]) and close >= sig.at[day, "sma50"] * (1 + rules.climax_stretch):
+                    pos.stretch_day = day_number
+                open_, prev_low = px(pos.ticker, day, "open"), px(pos.ticker, dates[day_number - 1], "low")
+                gap_down = open_ is not None and prev_low is not None and open_ < prev_low
             last_close[pos.ticker] = close
             # The line the rest (after +8%) is sold on: 3% below the 50-day SMA, or the 20 EMA.
             if rules.rest_exit == "sma50" and pd.notna(sig.at[day, "sma50"]):
@@ -378,7 +403,12 @@ def run(
                 pos.frozen_line = sig.at[day, "long_line"]
             elif sig.at[day, "trend"] == 1:
                 pos.frozen_line = float("nan")  # broke out: the real green line takes over tomorrow
-            if (rules.failed_breakout_exit and pos.intraday_entry and pos.entry_date == day
+            if (rules.climax_gain and gap_down and day != pos.entry_date
+                    and pos.best_close >= pos.entry_price * (1 + rules.climax_gain)
+                    and day_number - pos.stretch_day <= rules.climax_days):
+                # A long run, then a steep (compressed) leg far above the 50-day SMA, then a gap down.
+                pending_exits[pos.ticker] = "climax-exit"
+            elif (rules.failed_breakout_exit and pos.intraday_entry and pos.entry_date == day
                     and sig.at[day, "trend"] != 1 and pos.shares > 0):
                 # Bought on the touch of the flip level, but the day closed back below it:
                 # no BUY signal and no green line (so no stop). Get out at the next open.
@@ -454,6 +484,8 @@ def run(
             elif listed and bool(sig.at[day, "atr_buy"]):
                 candidates.insert(0, (ticker, sctr, "reentry"))
 
+        if rules.market_ma and not bool(market.get(day, False)):
+            candidates, close_setups = [], []  # market filter: SPY or QQQ below its average, no new buys
         seen = set()
         for order in candidates:
             if order[0] not in seen:

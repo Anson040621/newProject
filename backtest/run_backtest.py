@@ -65,6 +65,16 @@ def prepare(start, end, top_n: int = 10, require_squeeze: bool = True):
     return dates, prices, sigs, top
 
 
+def market_ok(dates, days: int = 200) -> pd.Series:
+    """True on days when SPY and QQQ both closed above their `days`-day average (total-return closes)."""
+    ok = pd.Series(True, index=dates)
+    for symbol in ("SPY", "QQQ"):
+        close = load_etf(symbol)["close"]
+        above = (close > close.rolling(days).mean()).reindex(dates).ffill()
+        ok &= above.fillna(False).astype(bool)
+    return ok
+
+
 def yearly_returns(equity: pd.Series, benchmark: pd.Series) -> pd.DataFrame:
     b = benchmark.reindex(equity.index).ffill()
     by_year = pd.DataFrame({"strategy": equity, "SPY": b}).groupby(equity.index.year)
@@ -144,6 +154,14 @@ def main(argv=None):
                         help="only stocks whose 1-year volatility (%% a year) is above this")
     parser.add_argument("--max-vol", type=float, default=defaults.max_vol,
                         help="only stocks whose 1-year volatility (%% a year) is below this (0 = off)")
+    parser.add_argument("--climax-gain", type=float, default=defaults.climax_gain,
+                        help="climax exit once a trade has been up this much, e.g. 0.40 (0 = off)")
+    parser.add_argument("--climax-stretch", type=float, default=defaults.climax_stretch,
+                        help="... after a close this far above the 50-day SMA (default 0.30)")
+    parser.add_argument("--climax-days", type=int, default=defaults.climax_days,
+                        help="... within this many trading days before the gap down (default 10)")
+    parser.add_argument("--market-ma", type=int, default=defaults.market_ma,
+                        help="no new buys unless SPY and QQQ close above their N-day average, e.g. 200 (0 = off)")
     parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,
                         help="no green line yet: sell this far below the previous close's red line, e.g. 0.03 (0 = off)")
     parser.add_argument("--reentry-after-tp", action=argparse.BooleanOptionalAction, default=defaults.reentry_after_tp,
@@ -163,7 +181,8 @@ def main(argv=None):
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
         extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
-        red_line_stop=args.red_line_stop,
+        red_line_stop=args.red_line_stop, climax_gain=args.climax_gain, climax_stretch=args.climax_stretch,
+        climax_days=args.climax_days, market_ma=args.market_ma,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
@@ -171,7 +190,8 @@ def main(argv=None):
     ranks = 10**4 if args.extra_slots else max(args.top, args.reentry_top)
     dates, prices, sigs, top = prepare(args.start, args.end, ranks, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
-    equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park)
+    market = market_ok(dates, args.market_ma) if args.market_ma else None
+    equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park, market=market)
     spy = load_benchmark(args.start)
 
     stats = strategy.summary(equity, trades, spy)
