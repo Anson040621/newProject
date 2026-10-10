@@ -59,21 +59,21 @@ def basic_rules(**overrides):
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
                     breakeven_exit=False, breakeven_buffer=0.0, rest_exit="ema20", failed_breakout_exit=False,
-                    rest_exit_delay=0, max_vol=0)
+                    rest_exit_delay=0, max_vol=0, reentry_after_tp=False)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_22():
+def test_default_rules_are_version_23():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
     assert (rules.atr_exit_on_touch, rules.atr_stop_buffer, rules.close_exit) == (True, 0.02, True)
     assert not rules.sticky_stop and rules.emergency_stop == 0.0 and not rules.rebuy_shakeouts
-    assert rules.breakeven_exit and (rules.rest_exit, rules.sma_exit_buffer) == ("sma50", 0.03)
+    assert not rules.breakeven_exit and (rules.rest_exit, rules.sma_exit_buffer) == ("sma50", 0.03)
     assert not rules.failed_breakout_exit
     assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev" and rules.rest_exit_delay == 21
-    assert (rules.min_vol, rules.max_vol) == (0, 75) and not rules.reentry_after_tp
+    assert (rules.min_vol, rules.max_vol) == (0, 75) and rules.reentry_after_tp and not rules.red_line_stop
 
 
 def make_world(closes, entry_day, exit_flags=None, ema=None):

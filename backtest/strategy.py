@@ -1,6 +1,7 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #22 = #21 with a 75% volatility limit on the stocks):
+Rules (defaults = version #23 = #22 without the break-even exit and with re-entry after
+any exit; #22 = #21 with a 75% volatility limit on the stocks):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90),
           skipping stocks whose volatility over the last year (252 trading days,
           annualised) is 75% or more (--max-vol, 0 = off = version #21; --min-vol
@@ -24,13 +25,14 @@ Rules (defaults = version #22 = #21 with a 75% volatility limit on the stocks):
                       below the 50-day SMA, once price has closed above that level
                       since entry and from 21 trading days after the entry or
                       re-entry on (--rest-exit-delay; 0 = from the start) (--rest-exit ema20 for the old rule: 3 closes in
-                      a row below the 20 EMA), or after a close more than 3% below
-                      the entry price (break-even exit, --breakeven-buffer 0 for a
-                      close at the entry = version #19, --no-breakeven-exit = off).
-  Re-entry after an exit before +8%, if the ATR trail flips back to BUY within 5
-          trading days of the exit: buy-stop at the flip level (no other
+                      a row below the 20 EMA). Nothing else sells the rest: between
+                      the +8% sale and day 21 it is simply held.
+                      Option --breakeven-exit (#22): also sell the rest after a close
+                      more than 3% below the entry price (--breakeven-buffer).
+  Re-entry after any exit (before or after +8%), if the ATR trail flips back to BUY
+          within 5 trading days of the exit: buy-stop at the flip level (no other
           conditions; --reentry-top N: only while the stock is in the top N).
-          Option --reentry-after-tp: also after the rest was sold after +8%.
+          Option --no-reentry-after-tp (#22): only after exits before +8%.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -88,7 +90,7 @@ class Rules:
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
-    reentry_after_tp: bool = False  # ... also after exits that came after the +8% partial
+    reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
     extra_slots: int = 0  # also buy stocks above min_sctr outside the top N, at most this many at a time (0 = off)
     min_vol: float = 0.0  # only stocks whose 1-year volatility (% a year, column "vol") is above this (0 = off)
     max_vol: float = 75.0  # ... and below this (0 = off)
@@ -97,7 +99,7 @@ class Rules:
     sticky_stop: bool = False  # keep the last stop when the green line disappears; never lower it
     close_exit: bool = True  # before +8%: also sell at the next open after a close below the line
     entry_buffer: float = 0.0  # buy-stop this far above the ATR flip level (entries and re-entries)
-    breakeven_exit: bool = True  # after +8%: sell the rest at the next open after a close at/below the entry
+    breakeven_exit: bool = False  # after +8%: sell the rest at the next open after a close at/below the entry
     breakeven_buffer: float = 0.03  # ... more than this far below the entry (0.03 = a close 3% below it)
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)

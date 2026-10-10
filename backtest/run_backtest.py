@@ -94,9 +94,9 @@ def main(argv=None):
     parser.add_argument("--close-exit", action=argparse.BooleanOptionalAction, default=defaults.close_exit,
                         help="with the intraday stop: also sell at the next open after a close below the line (default off)")
     parser.add_argument("--sticky-stop", action=argparse.BooleanOptionalAction, default=defaults.sticky_stop,
-                        help="keep the last stop when the green line disappears, never lower it (default on)")
+                        help="keep the last stop when the green line disappears, never lower it")
     parser.add_argument("--breakeven-exit", action=argparse.BooleanOptionalAction, default=defaults.breakeven_exit,
-                        help="after +8%%: sell the rest at the next open after a close at or below the entry (default on)")
+                        help="after +8%%: also sell the rest after a close 3%% below the entry (--breakeven-buffer); off since #23")
     parser.add_argument("--failed-breakout-exit", action=argparse.BooleanOptionalAction,
                         default=defaults.failed_breakout_exit,
                         help="sell at the next open if the entry day closes back below the flip level (default off)")
@@ -147,7 +147,7 @@ def main(argv=None):
     parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,
                         help="no green line yet: sell this far below the previous close's red line, e.g. 0.03 (0 = off)")
     parser.add_argument("--reentry-after-tp", action=argparse.BooleanOptionalAction, default=defaults.reentry_after_tp,
-                        help="also re-enter after the rest was sold after +8%%")
+                        help="also re-enter after the rest was sold after +8%% (default since #23; --no-reentry-after-tp = #22)")
     parser.add_argument("--park", default=None, metavar="ETF",
                         help="keep all money not in a trade in this ETF, e.g. QQQ (default: cash)")
     parser.add_argument("--park-cost", type=float, default=defaults.park_cost,
