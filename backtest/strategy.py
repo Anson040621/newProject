@@ -36,6 +36,10 @@ Rules (defaults = version #22 = #21 with a 75% volatility limit on the stocks):
           price, on the way up through the line, at which the squeeze is on and the
           bar is red (as the indicators read live). --entry-check either: the old
           order (setup at the previous close) or the live check.
+  Option --red-line-stop 0.03: while a position has no green line yet (the buy day
+          closed back below the flip line), sell everything the moment the price touches
+          3% below the previous close's red line (the down-trend line it was bought at),
+          at the open if it gaps below.
   Option --frozen-line: when the buy day closes back below the flip line (no green
           line), the green line that day would have had is frozen and used like a
           normal green line (2% stop below it, sell after a close below it) until
@@ -98,6 +102,7 @@ class Rules:
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     frozen_line: bool = False  # no-line entries: the green line the buy day would have had is a fixed stop
+    red_line_stop: float = 0.0  # no-line positions: sell this far below the previous close's red line (0 = off)
     rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
     entry_check: str = "prev"  # when the squeeze / red bar must show: "prev" close, "live" as the price
@@ -311,6 +316,21 @@ def run(
                     continue
                 fill = min(stop, open_) if open_ is not None and day != pos.entry_date else stop
                 sell(pos, pos.shares, fill, day, "no-line-stop" if frozen else "atr-stop")
+                close_out(pos, day)
+
+        # 2a'. Red-line stop: while a position has no green line yet (the buy day closed back
+        #      below the flip line), sell everything the moment the price touches the stop below
+        #      yesterday's red line, at the open if it gaps below.
+        if rules.red_line_stop:
+            for pos in list(positions.values()):
+                if pos.tp_taken or day == pos.entry_date or pd.notna(signals[pos.ticker].at[day, "atr_stop"]):
+                    continue
+                red = signals[pos.ticker].at[day, "flip_level"]
+                low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
+                stop = red * (1 - rules.red_line_stop)
+                if pd.isna(stop) or low is None or low > stop:
+                    continue
+                sell(pos, pos.shares, min(stop, open_) if open_ is not None else stop, day, "red-line-stop")
                 close_out(pos, day)
 
         # 2b. Intraday: take 1/3 profit when the high reaches +8%.

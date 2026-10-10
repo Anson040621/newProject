@@ -144,6 +144,8 @@ def main(argv=None):
                         help="only stocks whose 1-year volatility (%% a year) is above this")
     parser.add_argument("--max-vol", type=float, default=defaults.max_vol,
                         help="only stocks whose 1-year volatility (%% a year) is below this (0 = off)")
+    parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,
+                        help="no green line yet: sell this far below the previous close's red line, e.g. 0.03 (0 = off)")
     parser.add_argument("--reentry-after-tp", action=argparse.BooleanOptionalAction, default=defaults.reentry_after_tp,
                         help="also re-enter after the rest was sold after +8%%")
     parser.add_argument("--park", default=None, metavar="ETF",
@@ -161,6 +163,7 @@ def main(argv=None):
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
         extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
+        red_line_stop=args.red_line_stop,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,

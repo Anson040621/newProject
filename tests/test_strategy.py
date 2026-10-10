@@ -458,6 +458,22 @@ def test_reentry_after_the_rest_was_sold_after_take_profit():
     assert list(trades["entry_date"]) == [dates[2], dates[10]] and list(trades["reentry"]) == [False, True]
 
 
+def test_red_line_stop_sells_a_false_breakout():
+    closes = [100, 100, 100, 99, 95, 96]
+    dates, prices, sigs, top = make_world(closes, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["setup"] = [False, True, False, False, False, False]  # squeeze + red bar on day 1
+    sig["trend"] = -1  # the buy day closes back below the line: no green line
+    sig["flip_level"] = [np.nan, np.nan, 100.5, 100.5, 100.5, 100.5]
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True))
+    assert len(trades) == 1 and "red-line-stop" not in trades.iloc[0]["exits"]  # held without the rule
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, entry_on_touch=True, red_line_stop=0.03))
+    trade = trades.iloc[0]
+    assert trade["entry_date"] == dates[2] and trade["entry_price"] == 100.5
+    # Day 3's low (98.01) stays above 97.49 (3% below 100.5); day 4 opens at 95, below the stop.
+    assert trade["exits"] == f"{dates[4].date()} red-line-stop 149@95.00"
+
+
 def test_volatility_limit_needs_the_vol_column():
     dates, prices, sigs, top = make_world([100] * 5, entry_day=1)
     with pytest.raises(ValueError):
