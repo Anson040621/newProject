@@ -494,6 +494,10 @@ def test_climax_exit_after_a_steep_run_and_a_gap_down():
     rules = basic_rules(cost=0.0, climax_gain=0.40, climax_stretch=0.30, climax_ma=50, climax_gap=0.05)
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert "climax-exit" not in trades.iloc[0]["exits"]
+    # ... but a big red candle also counts: day 6 closes 5.3% below day 5's close (150 -> 142).
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, climax_gain=0.40, climax_stretch=0.30,
+                                                                  climax_ma=50, climax_gap=0.05, climax_drop=0.05))
+    assert trades.iloc[0]["exits"].endswith(f"{dates[7].date()} climax-exit 100@141.00")
 
 
 def test_market_filter_blocks_new_buys():

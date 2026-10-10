@@ -43,7 +43,10 @@ exit and with re-entry after any exit; #22 = #21 with a 75% volatility limit on 
           50% or more above its 100-day SMA (--climax-stretch, --climax-days,
           --climax-ma: a steep, compressed run), an open at least 5% below the
           previous day's low (--climax-gap) sells everything at the next open, with
-          no re-entry (--climax-reentry to allow it).
+          no re-entry (--climax-reentry to allow it). Options for a big red candle as
+          a second trigger: --climax-drop 0.08 (a close 8%+ below the previous close),
+          --climax-body 0.06 (a close 6%+ below the day's open), --climax-drop-atr 2.5
+          (a fall from the previous close of 2.5+ times the stock's average daily range).
   Option --market-ma 200: market filter - no new buys (setups or re-entries) unless
           SPY and QQQ both closed above their 200-day average that evening.
   Option --red-line-stop 0.03: while a position has no green line yet (the buy day
@@ -119,6 +122,9 @@ class Rules:
     climax_reentry: bool = False  # ... unless this is on (the usual re-entry rule then applies)
     climax_ma: int = 100  # the average the stretch is measured against (50 or 100-day SMA)
     climax_gap: float = 0.05  # gap down = open at least this far below the previous day's low (0 = any)
+    climax_drop: float = 0.0  # ... or a big red candle: a close this far below the previous close (0 = off)
+    climax_body: float = 0.0  # ... or a close this far below the day's open (0 = off)
+    climax_drop_atr: float = 0.0  # ... or a fall from the previous close of N x yesterday's ATR(14) (0 = off)
     market_ma: int = 0  # market filter: no new buys unless SPY and QQQ close above their N-day average (0 = off)
     rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
@@ -394,6 +400,15 @@ def run(
                     pos.stretch_day = day_number
                 open_, prev_low = px(pos.ticker, day, "open"), px(pos.ticker, dates[day_number - 1], "low")
                 gap_down = open_ is not None and prev_low is not None and open_ < prev_low * (1 - rules.climax_gap)
+                prev_day = dates[day_number - 1]
+                prev_close = px(pos.ticker, prev_day, "close")
+                if prev_close is not None and rules.climax_drop and close <= prev_close * (1 - rules.climax_drop):
+                    gap_down = True  # big red candle: a large fall from yesterday's close
+                if open_ is not None and rules.climax_body and close <= open_ * (1 - rules.climax_body):
+                    gap_down = True  # big red candle: a long red body
+                atr = sig.at[prev_day, "atr14"] if rules.climax_drop_atr and "atr14" in sig.columns else float("nan")
+                if prev_close is not None and pd.notna(atr) and prev_close - close >= rules.climax_drop_atr * atr:
+                    gap_down = True  # big red candle relative to the stock's normal daily range
             last_close[pos.ticker] = close
             # The line the rest (after +8%) is sold on: 3% below the 50-day SMA, or the 20 EMA.
             if rules.rest_exit == "sma50" and pd.notna(sig.at[day, "sma50"]):

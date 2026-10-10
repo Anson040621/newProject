@@ -164,6 +164,12 @@ def main(argv=None):
                         help="... measured against the 50 or 100-day SMA (default 100)")
     parser.add_argument("--climax-gap", type=float, default=defaults.climax_gap,
                         help="... gap down = open at least this far below the previous low (default 0.05)")
+    parser.add_argument("--climax-drop", type=float, default=defaults.climax_drop,
+                        help="... or a big red candle: a close this far below the previous close, e.g. 0.08 (0 = off)")
+    parser.add_argument("--climax-body", type=float, default=defaults.climax_body,
+                        help="... or a close this far below the day's open, e.g. 0.06 (0 = off)")
+    parser.add_argument("--climax-drop-atr", type=float, default=defaults.climax_drop_atr,
+                        help="... or a fall from the previous close of N x the 14-day ATR, e.g. 2.5 (0 = off)")
     parser.add_argument("--market-ma", type=int, default=defaults.market_ma,
                         help="no new buys unless SPY and QQQ close above their N-day average, e.g. 200 (0 = off)")
     parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,
@@ -187,6 +193,7 @@ def main(argv=None):
         extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
         red_line_stop=args.red_line_stop, climax_gain=args.climax_gain, climax_stretch=args.climax_stretch,
         climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
+        climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
