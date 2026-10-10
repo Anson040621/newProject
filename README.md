@@ -119,7 +119,11 @@ The defaults are the current rule set ("version #23" = #22 without the break-eve
 
 2015-01-02 to 2026-10-02 with the defaults (#23): $100k -> $934k (20.9% a year,
 worst drawdown -28.4%, Sharpe 1.07, 350 trades, 43% winners, profit factor 2.91) vs SPY
-13.8% a year (worst drawdown -33.7%). #22 (`--breakeven-exit --no-reentry-after-tp`):
+13.8% a year (worst drawdown -33.7%). With idle money in QQQ (`--park QQQ`): $1.48M
+(25.9% a year, worst drawdown -41.0%, Nov 2021 to Jun 2022, Sharpe 0.96) vs holding QQQ
+alone $794k (19.3% a year, worst drawdown -35.1%); 2022 was -26% instead of -6%, while the
+calm bull years improved (2019 +37% vs +15%, 2021 +8% vs -6%, 2023 +28% vs +5%).
+#22 (`--breakeven-exit --no-reentry-after-tp`):
 $427k (13.2% a year, worst drawdown -22.8%, 254 trades, 44% winners, profit factor 2.75).
 #21 (#22 without the volatility limit, adding `--max-vol 0`): $347k (11.2% a year, worst drawdown
 -27.5%, 302 trades, 42% winners, profit factor 1.82). #20 (#21 with the 50-day exit from the start, also `--rest-exit-delay 0`): $356k (11.4%, -26%). #19 (#20 with the break-even exit at the entry, also `--breakeven-buffer 0`): $375k (11.9%,
