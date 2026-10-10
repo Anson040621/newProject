@@ -162,6 +162,8 @@ def main(argv=None):
                         help="... after a close this far above the --climax-ma SMA (default 0.50)")
     parser.add_argument("--climax-days", type=int, default=defaults.climax_days,
                         help="... within this many trading days before the gap down (default 10)")
+    parser.add_argument("--climax-reentry", action=argparse.BooleanOptionalAction, default=defaults.climax_reentry,
+                        help="allow the usual re-entry after a climax exit (default off)")
     parser.add_argument("--climax-ma", type=int, choices=[50, 100], default=defaults.climax_ma,
                         help="... measured against the 50 or 100-day SMA (default 100)")
     parser.add_argument("--climax-gap", type=float, default=defaults.climax_gap,
@@ -196,6 +198,7 @@ def main(argv=None):
         red_line_stop=args.red_line_stop, climax_gain=args.climax_gain, climax_stretch=args.climax_stretch,
         climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
+        climax_reentry=args.climax_reentry,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
