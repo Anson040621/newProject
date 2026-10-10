@@ -42,6 +42,8 @@ Rules (defaults = version #21 = #20 with the 50-day exit switched on one month a
   Option --dim-green-days N: for N trading days after an entry on the full
           setup (42 = about 2 months), once we have sold, the same setup with a
           dim green momentum bar (above zero, not rising) also counts.
+  Option --max-vol 75: skip stocks whose volatility over the last year (252 trading
+          days, annualised) is 75% or more (--min-vol: skip the calmest ones).
   Option --extra-slots N: also trade the setup on any stock with an SCTR above 90
           outside the top 10, at most N such positions at a time (their re-entries
           count too). The top 10 go first when signals arrive on the same day.
@@ -81,6 +83,8 @@ class Rules:
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     extra_slots: int = 0  # also buy stocks above min_sctr outside the top N, at most this many at a time (0 = off)
+    min_vol: float = 0.0  # only stocks whose 1-year volatility (% a year, column "vol") is above this (0 = off)
+    max_vol: float = 0.0  # ... and below this (e.g. 75; 0 = off)
     park_cost: float = 0.0005  # cost per move in/out of the parking ETF (with park=...)
     atr_stop_buffer: float = 0.02  # with atr_exit_on_touch: stop this far below the trail line (0.02 = 2%)
     sticky_stop: bool = False  # keep the last stop when the green line disappears; never lower it
@@ -149,6 +153,10 @@ def run(
     """
     listed = 10**9 if rules.extra_slots else rules.top_n  # extra_slots: every stock above min_sctr
     top = top[(top["rank"] <= max(listed, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
+    if rules.min_vol:
+        top = top[top["vol"] > rules.min_vol]
+    if rules.max_vol:
+        top = top[top["vol"] < rules.max_vol]
     top_by_day = {d: g[g["rank"] <= listed].sort_values("rank") for d, g in top.groupby("date")}
     reentry_ok = {d: set(g.loc[g["rank"] <= rules.reentry_top, "ticker"]) for d, g in top.groupby("date")}
 

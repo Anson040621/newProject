@@ -475,6 +475,20 @@ def test_extra_slots_for_stocks_outside_the_top_n():
     assert sorted(trades["ticker"]) == ["T0", "T1", "T2"]
 
 
+def test_volatility_limits_skip_the_wildest_and_calmest_stocks():
+    dates, prices, sigs, top = make_world([100] * 5, entry_day=1)
+    vols = {"CALM": 20.0, "MID": 50.0, "WILD": 110.0}
+    prices = {t: prices["AAA"] for t in vols}
+    sigs = {t: sigs["AAA"] for t in vols}
+    top = pd.concat([top.assign(ticker=t, rank=i + 1, vol=v) for i, (t, v) in enumerate(vols.items())])
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
+    assert sorted(trades["ticker"]) == ["CALM", "MID", "WILD"]
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, max_vol=75))
+    assert sorted(trades["ticker"]) == ["CALM", "MID"]
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, min_vol=30, max_vol=75))
+    assert list(trades["ticker"]) == ["MID"]
+
+
 def test_rest_exit_waits_until_a_month_after_entry():
     # MSTR, Sep 2024: +8% on the buy day, then a dip below the 50-day line two days later.
     closes = [100, 100, 100, 109, 112, 107.8, 106.15, 106, 105, 104]
