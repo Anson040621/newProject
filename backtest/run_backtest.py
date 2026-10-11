@@ -163,6 +163,8 @@ def main(argv=None):
                              "before they left, e.g. 42 = about 2 months (default 0 = any)")
     parser.add_argument("--list-memory-gap", type=int, default=defaults.list_memory_gap,
                         help="breaks of up to this many trading days don't end a run on the list (default 5)")
+    parser.add_argument("--list-memory-above-ma", type=int, default=defaults.list_memory_above_ma,
+                        help="with --list-memory: only while the setup close is above this SMA, 50 or 100 (default 0 = off)")
     parser.add_argument("--profit-floor", type=float, default=defaults.profit_floor,
                         help="after +8%%: once the trade has been up --profit-floor-after at a close, sell the rest "
                              "after a close below this gain, e.g. 0.10 = +10%% (default 0 = off)")
@@ -222,7 +224,7 @@ def main(argv=None):
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
         profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
         list_memory_min_sctr=args.list_memory_min_sctr, list_memory_min_run=args.list_memory_min_run,
-        list_memory_gap=args.list_memory_gap,
+        list_memory_gap=args.list_memory_gap, list_memory_above_ma=args.list_memory_above_ma,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,

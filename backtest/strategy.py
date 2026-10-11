@@ -46,7 +46,8 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           --list-memory-min-sctr 50: forget such a stock once its SCTR closes below 50
           (until it is back on the list). --list-memory-min-run 42: only stocks that had
           been on the list for 42 trading days in a row before they left (breaks of up
-          to 5 trading days allowed, --list-memory-gap).
+          to 5 trading days allowed, --list-memory-gap). --list-memory-above-ma 100: only
+          while the setup close is above the stock's 100-day SMA.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -119,6 +120,7 @@ class Rules:
     list_memory_min_sctr: float = 0.0  # ... forgotten once their SCTR closes below this (needs every stock's SCTR)
     list_memory_min_run: int = 0  # ... only if they were on the list this many trading days in a row before leaving
     list_memory_gap: int = 5  # ... breaks of up to this many trading days don't end a run on the list
+    list_memory_above_ma: int = 0  # ... only while the setup close is above this SMA (50 or 100; 0 = off)
     reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
     reentry_max_losses: int = 3  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off = #25)
     reentry_win: float = 0.20  # ... a win = a trade that made more than this (0.20 = +20%); anything less counts as a loss
@@ -209,6 +211,9 @@ def run(
     """
     listed = 10**9 if rules.extra_slots else rules.top_n  # extra_slots: every stock above min_sctr
     all_sctr = None
+    if rules.list_memory and rules.list_memory_above_ma:
+        if any(f"sma{rules.list_memory_above_ma}" not in s.columns for s in signals.values()):
+            raise ValueError(f"list_memory_above_ma needs an 'sma{rules.list_memory_above_ma}' signal column")
     if rules.list_memory and rules.list_memory_min_sctr:
         if top["rank"].max() <= max(listed, rules.reentry_top):
             raise ValueError("list_memory_min_sctr needs every stock's SCTR in the top table (all ranks)")
@@ -515,6 +520,10 @@ def run(
                 sig = signals.get(row.ticker)
                 if sig is None or row.ticker in positions:
                     continue
+                if getattr(row, "recent", False) and rules.list_memory_above_ma:
+                    ma, close = sig.at[day, f"sma{rules.list_memory_above_ma}"], px(row.ticker, day, "close")
+                    if pd.isna(ma) or close is None or close <= ma:
+                        continue  # a stock that left the list must still be above its average
                 # Follow-up entry: we bought this stock on the full setup within the last
                 # N days and have since sold; now the same setup with a dim green bar counts too.
                 since = day_number - setup_entries.get(row.ticker, -10**9)

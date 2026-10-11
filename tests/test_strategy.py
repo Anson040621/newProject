@@ -595,6 +595,16 @@ def test_list_memory_needs_a_long_enough_run_on_the_list():
     assert len(run(list_memory_min_run=6, list_memory_gap=0)) == 0  # no breaks allowed: the run is days 4-5
 
 
+def test_list_memory_can_require_a_close_above_the_100_day_average():
+    dates, prices, sigs, top = make_world([100] * 10, entry_day=6)
+    top = top[top["date"] <= dates[2]]  # on the list on days 0-2; the setup shows on day 6
+    sigs["AAA"]["sma100"] = 90.0
+    run = lambda **kw: strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, list_memory=5, **kw))[1]
+    assert len(run(list_memory_above_ma=100)) == 1  # close 100 above the average of 90
+    sigs["AAA"]["sma100"] = 110.0
+    assert len(run(list_memory_above_ma=100)) == 0 and len(run()) == 1  # below its average: skipped
+
+
 def test_extra_slots_for_stocks_outside_the_top_n():
     # Three stocks signal on the same day, ranked #1, #15 and #20 (all SCTR above 90).
     dates, prices, sigs, top = make_world([100] * 5, entry_day=1)
