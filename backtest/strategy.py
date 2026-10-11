@@ -30,6 +30,9 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
                       the +8% sale and day 21 it is simply held.
                       Option --breakeven-exit (#22): also sell the rest after a close
                       more than 3% below the entry price (--breakeven-buffer).
+                      Option --profit-floor 0.10: once the trade has been up 20% at a
+                      close (--profit-floor-after), also sell the rest at the next open
+                      after a close below +10%.
   Re-entry after any exit (before or after +8%), if the ATR trail flips back to BUY
           within 5 trading days of the exit: buy-stop at the flip level (no other
           conditions; --reentry-top N: only while the stock is in the top N).
@@ -118,6 +121,8 @@ class Rules:
     entry_buffer: float = 0.0  # buy-stop this far above the ATR flip level (entries and re-entries)
     breakeven_exit: bool = False  # after +8%: sell the rest at the next open after a close at/below the entry
     breakeven_buffer: float = 0.03  # ... more than this far below the entry (0.03 = a close 3% below it)
+    profit_floor: float = 0.0  # after +8%: sell the rest after a close below this gain (0.10 = +10%; 0 = off) ...
+    profit_floor_after: float = 0.20  # ... once the trade has been up this much at a close
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
     frozen_line: bool = False  # no-line entries: the green line the buy day would have had is a fixed stop
@@ -405,8 +410,8 @@ def run(
                 continue
             pos.days_without_price = 0
             gap_down = False
+            pos.best_close = max(pos.best_close, close)
             if rules.climax_gain:
-                pos.best_close = max(pos.best_close, close)
                 ma = sig.at[day, f"sma{rules.climax_ma}"]
                 if pd.notna(ma) and close >= ma * (1 + rules.climax_stretch):
                     pos.stretch_day = day_number
@@ -456,6 +461,9 @@ def run(
             elif (pos.armed and pos.closes_below_ema >= closes_needed
                   and day_number - pos.entry_day >= rules.rest_exit_delay):
                 pending_exits[pos.ticker] = "exit"
+            elif (rules.profit_floor and pos.best_close >= pos.entry_price * (1 + rules.profit_floor_after)
+                  and close < pos.entry_price * (1 + rules.profit_floor)):
+                pending_exits[pos.ticker] = "profit-floor"  # was up 20%+, now back below +10%
             elif rules.breakeven_exit and close <= pos.entry_price * (1 - rules.breakeven_buffer):
                 pending_exits[pos.ticker] = "breakeven"  # gave back the whole gain
             if close > rest_line:

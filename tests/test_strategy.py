@@ -77,7 +77,7 @@ def test_default_rules_are_version_26():
     assert (rules.min_vol, rules.max_vol) == (0, 75) and rules.reentry_after_tp and not rules.red_line_stop
     assert (rules.climax_gain, rules.climax_stretch, rules.climax_ma, rules.climax_gap, rules.climax_days) == (0.40, 0.50, 100, 0.05, 10)
     assert not rules.climax_reentry and not rules.market_ma
-    assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20)
+    assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -548,6 +548,20 @@ def test_reentry_stops_after_three_trades_in_a_row_without_a_win():
     trades = run(reentry_max_losses=3)
     assert list(trades["entry_date"]) == [dates[2], dates[6], dates[10], dates[18], dates[22]]
     assert len(run(reentry_max_losses=3, reentry_win=-1.0)) == 6  # every trade a "win": nothing skipped
+
+
+def test_profit_floor_sells_the_rest_after_a_round_trip():
+    #        signal  entry  +25% (gap)  +20%  +9% -> sold at the next open
+    closes = [100, 100, 100, 125, 120, 109, 108, 107]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=[50] * 8)
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, profit_floor=0.10))
+    fills = trades.iloc[0]["exits"].split("; ")
+    assert fills[0].startswith(f"{dates[3].date()} take-profit 50@125.00")
+    assert fills[1].startswith(f"{dates[6].date()} profit-floor 100@108.00")  # close 109 < +10% on day 5
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
+    assert "profit-floor" not in trades.iloc[0]["exits"]  # off by default
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, profit_floor=0.10, profit_floor_after=0.30))
+    assert "profit-floor" not in trades.iloc[0]["exits"]  # never up 30%
 
 
 def test_extra_slots_for_stocks_outside_the_top_n():
