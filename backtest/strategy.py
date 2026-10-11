@@ -34,6 +34,9 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           within 5 trading days of the exit: buy-stop at the flip level (no other
           conditions; --reentry-top N: only while the stock is in the top N).
           Option --no-reentry-after-tp (#22): only after exits before +8%.
+          Option --reentry-max-losses N: stop re-buying a stock after N trades in a
+          row (its setup buy and the re-buys after it) that made no more than 20%
+          (--reentry-win); a new setup buy starts the count again.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -103,6 +106,8 @@ class Rules:
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
+    reentry_max_losses: int = 0  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off)
+    reentry_win: float = 0.20  # ... a win = a trade that made more than this (0.20 = +20%); anything less counts as a loss
     extra_slots: int = 0  # also buy stocks above min_sctr outside the top N, at most this many at a time (0 = off)
     min_vol: float = 0.0  # only stocks whose 1-year volatility (% a year, column "vol") is above this (0 = off)
     max_vol: float = 75.0  # ... and below this (0 = off)
@@ -206,6 +211,7 @@ def run(
     touch_orders: list[tuple[str, float, str]] = []  # buy-stop orders at the ATR flip level, for today
     early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
     setup_entries: dict[str, int] = {}  # ticker -> day number of the last full-setup entry
+    loss_streak: dict[str, int] = {}  # ticker -> trades in a row since its last setup buy that did not win
     entered_today: set[str] = set()
     extra_orders: set[str] = set()  # tonight's orders that count against extra_slots
     extra_tickers: set[str] = set()  # tickers whose last trade did (so their re-entries do too)
@@ -244,7 +250,10 @@ def run(
         })
         del positions[pos.ticker]
         climax = bool(pos.fills) and pos.fills[-1][1] == "climax-exit" and not rules.climax_reentry
-        if rules.reentry_days and (not pos.tp_taken or rules.reentry_after_tp) and not climax:
+        won = pos.proceeds / pos.cost_basis - 1 > rules.reentry_win
+        loss_streak[pos.ticker] = 0 if won else loss_streak.get(pos.ticker, 0) + 1
+        worn_out = rules.reentry_max_losses and loss_streak[pos.ticker] >= rules.reentry_max_losses
+        if rules.reentry_days and (not pos.tp_taken or rules.reentry_after_tp) and not climax and not worn_out:
             early_exits[pos.ticker] = (day_number, pos.sctr, pos.fills[-1][1] if pos.fills else "")
 
     def buy(ticker, price, day, sctr, kind, intraday) -> bool:
@@ -265,6 +274,8 @@ def run(
         (extra_tickers.add if extra else extra_tickers.discard)(ticker)
         early_exits.pop(ticker, None)
         entered_today.add(ticker)
+        if kind != "reentry":
+            loss_streak[ticker] = 0  # a new setup buy starts a new run of re-buys
         if kind.startswith("setup"):
             setup_entries[ticker] = day_number
         return True

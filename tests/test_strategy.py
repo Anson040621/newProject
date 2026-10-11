@@ -75,7 +75,7 @@ def test_default_rules_are_version_25():
     assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev" and rules.rest_exit_delay == 21
     assert (rules.min_vol, rules.max_vol) == (0, 75) and rules.reentry_after_tp and not rules.red_line_stop
     assert (rules.climax_gain, rules.climax_stretch, rules.climax_ma, rules.climax_gap, rules.climax_days) == (0.40, 0.50, 100, 0.05, 10)
-    assert not rules.climax_reentry and not rules.market_ma
+    assert not rules.climax_reentry and not rules.market_ma and rules.reentry_max_losses == 0
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -530,6 +530,22 @@ def test_reentry_only_while_in_the_top_n():
     assert len(trades) == 1  # outside the top 10 that evening: no re-entry
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, reentry_top=20))
     assert list(trades["entry_date"]) == [dates[2], dates[7]]
+
+
+def test_reentry_stops_after_three_trades_in_a_row_without_a_win():
+    # Each exit flag sells at the next open; each flip back to BUY re-buys at the next open.
+    closes = [100] * 26
+    dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=[d in (3, 7, 11, 15, 19, 23) for d in range(26)])
+    sigs["AAA"]["atr_buy"] = [d in (5, 9, 13, 21) for d in range(26)]
+    sigs["AAA"]["entry_setup"] = [d in (1, 17) for d in range(26)]
+    sigs["AAA"]["setup"] = sigs["AAA"]["entry_setup"]
+    run = lambda **kw: strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, reentry_days=5, **kw))[1]
+    assert list(run()["entry_kind"]) == ["setup", "reentry", "reentry", "reentry", "setup", "reentry"]
+    # The setup buy and two re-buys all end flat (not above +20%): the re-buy on day 14 is skipped.
+    # The new setup buy on day 18 starts the count again, so its re-buy on day 22 goes ahead.
+    trades = run(reentry_max_losses=3)
+    assert list(trades["entry_date"]) == [dates[2], dates[6], dates[10], dates[18], dates[22]]
+    assert len(run(reentry_max_losses=3, reentry_win=-1.0)) == 6  # every trade a "win": nothing skipped
 
 
 def test_extra_slots_for_stocks_outside_the_top_n():
