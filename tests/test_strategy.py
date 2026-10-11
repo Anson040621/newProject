@@ -574,6 +574,18 @@ def test_list_memory_allows_stocks_that_left_the_list_recently():
     assert list(trades["entry_date"]) == [dates[7]] and trades.iloc[0]["entry_kind"] == "setup-recent"
 
 
+def test_list_memory_forgets_a_stock_whose_sctr_falls_below_the_floor():
+    dates, prices, sigs, top = make_world([100] * 10, entry_day=6)
+    top.loc[3:, "rank"] = 50  # off the list from day 3 on, with an SCTR of 60 ...
+    top.loc[3:, "sctr"] = 60.0
+    top.loc[4, "sctr"] = 40.0  # ... that dips to 40 on day 4
+    run = lambda **kw: strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, list_memory=5, **kw))[1]
+    assert len(run()) == 1 and len(run(list_memory_min_sctr=30)) == 1
+    assert len(run(list_memory_min_sctr=50)) == 0  # fell below 50 on day 4: forgotten
+    with pytest.raises(ValueError):  # needs the SCTR of the stocks outside the top 10
+        strategy.run(dates, prices, sigs, top[top["rank"] == 1], basic_rules(list_memory=5, list_memory_min_sctr=50))
+
+
 def test_extra_slots_for_stocks_outside_the_top_n():
     # Three stocks signal on the same day, ranked #1, #15 and #20 (all SCTR above 90).
     dates, prices, sigs, top = make_world([100] * 5, entry_day=1)

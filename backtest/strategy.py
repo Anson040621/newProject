@@ -43,6 +43,8 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
   Option --list-memory N: also look for the setup in stocks that were on the list (top
           10, SCTR above 90, volatility limit) on any of the last N trading days, even if
           they have dropped out since; their orders come after today's top 10.
+          --list-memory-min-sctr 50: forget such a stock once its SCTR closes below 50
+          (until it is back on the list).
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -111,7 +113,8 @@ class Rules:
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
-    list_memory: int = 0  # also stocks that were on the list on any of the last N trading days (0 = off)
+    list_memory: int = 0  # also stocks that were on the list on any of the last N trading days (0 = off) ...
+    list_memory_min_sctr: float = 0.0  # ... forgotten once their SCTR closes below this (needs every stock's SCTR)
     reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
     reentry_max_losses: int = 3  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off = #25)
     reentry_win: float = 0.20  # ... a win = a trade that made more than this (0.20 = +20%); anything less counts as a loss
@@ -201,6 +204,11 @@ def run(
     Returns the daily equity curve and the trade log.
     """
     listed = 10**9 if rules.extra_slots else rules.top_n  # extra_slots: every stock above min_sctr
+    all_sctr = None
+    if rules.list_memory and rules.list_memory_min_sctr:
+        if top["rank"].max() <= max(listed, rules.reentry_top):
+            raise ValueError("list_memory_min_sctr needs every stock's SCTR in the top table (all ranks)")
+        all_sctr = top.pivot_table(index="date", columns="ticker", values="sctr")
     top = top[(top["rank"] <= max(listed, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
     if rules.market_ma and market is None:
         raise ValueError("market_ma needs the market series (True = SPY and QQQ above their average)")
@@ -220,6 +228,10 @@ def run(
             if g is not None:
                 last_listed.update((t, (i, s)) for t, s in zip(g["ticker"], g["sctr"]))
             last_listed = {t: v for t, v in last_listed.items() if i - v[0] <= rules.list_memory}
+            if all_sctr is not None:
+                today_sctr = all_sctr.loc[d] if d in all_sctr.index else pd.Series(dtype=float)
+                last_listed = {t: v for t, v in last_listed.items()
+                               if v[0] == i or today_sctr.get(t, np.nan) >= rules.list_memory_min_sctr}
             recent = sorted(((s, t) for t, (j, s) in last_listed.items() if j < i), reverse=True)
             if recent:
                 rows = pd.DataFrame({"date": d, "rank": 10**6, "ticker": [t for _, t in recent],

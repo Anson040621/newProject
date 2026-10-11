@@ -156,6 +156,8 @@ def main(argv=None):
     parser.add_argument("--list-memory", type=int, default=defaults.list_memory,
                         help="also look for the setup in stocks that were on the list on any of the last N trading "
                              "days, e.g. 21 = about a month (default 0 = only today's list)")
+    parser.add_argument("--list-memory-min-sctr", type=float, default=defaults.list_memory_min_sctr,
+                        help="with --list-memory: forget a stock once its SCTR closes below this, e.g. 50 (default 0 = off)")
     parser.add_argument("--profit-floor", type=float, default=defaults.profit_floor,
                         help="after +8%%: once the trade has been up --profit-floor-after at a close, sell the rest "
                              "after a close below this gain, e.g. 0.10 = +10%% (default 0 = off)")
@@ -214,11 +216,12 @@ def main(argv=None):
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
         profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
+        list_memory_min_sctr=args.list_memory_min_sctr,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
-    ranks = 10**4 if args.extra_slots else max(args.top, args.reentry_top)
+    ranks = 10**4 if args.extra_slots or args.list_memory_min_sctr else max(args.top, args.reentry_top)
     dates, prices, sigs, top = prepare(args.start, args.end, ranks, not args.no_squeeze)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
     market = market_ok(dates, args.market_ma) if args.market_ma else None
