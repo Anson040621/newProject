@@ -48,6 +48,9 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           been on the list for 42 trading days in a row before they left (breaks of up
           to 5 trading days allowed, --list-memory-gap). --list-memory-above-ma 100: only
           while the setup close is above the stock's 100-day SMA.
+  Option --late-entry-days 10: a stock in today's top 10 that gave a valid entry (setup at a
+          close, then the price reached the flip level) in the last 10 trading days while it
+          was not on the list, and is still in its ATR up-trend: buy at the next open.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -116,6 +119,7 @@ class Rules:
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
+    late_entry_days: int = 0  # buy a top-10 stock whose valid entry came in the last N days while off the list (0 = off)
     list_memory: int = 0  # also stocks that were on the list on any of the last N trading days (0 = off) ...
     list_memory_min_sctr: float = 0.0  # ... forgotten once their SCTR closes below this (needs every stock's SCTR)
     list_memory_min_run: int = 0  # ... only if they were on the list this many trading days in a row before leaving
@@ -260,6 +264,16 @@ def run(
     early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
     setup_entries: dict[str, int] = {}  # ticker -> day number of the last full-setup entry
     loss_streak: dict[str, int] = {}  # ticker -> trades in a row since its last setup buy that did not win
+    missed: dict[str, int] = {}  # ticker -> day number of its last valid entry while off the list (--late-entry-days)
+    entries_on: dict[int, list[str]] = {}  # day number -> tickers whose buy-stop would have filled that day
+    listed_on = {d: set(g["ticker"]) for d, g in top_by_day.items()}
+    if rules.late_entry_days:
+        for tk, sig in signals.items():
+            if tk not in prices:
+                continue
+            armed = sig["setup"].shift(1, fill_value=False).astype(bool) & (sig["trend"].shift(1) != 1)
+            for i in np.flatnonzero((armed & (prices[tk]["high"] >= sig["flip_level"])).to_numpy()):
+                entries_on.setdefault(int(i), []).append(tk)
     entered_today: set[str] = set()
     extra_orders: set[str] = set()  # tonight's orders that count against extra_slots
     extra_tickers: set[str] = set()  # tickers whose last trade did (so their re-entries do too)
@@ -321,6 +335,7 @@ def run(
                                      entry_day=day_number, extra=extra)
         (extra_tickers.add if extra else extra_tickers.discard)(ticker)
         early_exits.pop(ticker, None)
+        missed.pop(ticker, None)
         entered_today.add(ticker)
         if kind != "reentry":
             loss_streak[ticker] = 0  # a new setup buy starts a new run of re-buys
@@ -571,6 +586,17 @@ def run(
             elif listed and bool(sig.at[day, "atr_buy"]):
                 candidates.insert(0, (ticker, sctr, "reentry"))
 
+        # --late-entry-days: valid entries made while off the list, bought once the stock is on it.
+        if rules.late_entry_days:
+            for tk in entries_on.get(day_number, ()):
+                if day_number and tk not in listed_on.get(dates[day_number - 1], ()):
+                    missed[tk] = day_number
+            if today is not None:
+                for row in today.itertuples():
+                    j = missed.get(row.ticker)
+                    if (j is not None and day_number - j <= rules.late_entry_days and row.ticker not in positions
+                            and signals[row.ticker].at[day, "trend"] == 1):
+                        close_setups.append((row.ticker, row.sctr, "setup-late"))
         if rules.market_ma and not bool(market.get(day, False)):
             candidates, close_setups = [], []  # market filter: SPY or QQQ below its average, no new buys
         seen = set()

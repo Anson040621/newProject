@@ -153,6 +153,9 @@ def main(argv=None):
     parser.add_argument("--reentry-max-losses", type=int, default=defaults.reentry_max_losses,
                         help="stop re-buying a stock after N trades in a row (its setup buy and the re-buys after it) "
                              "that made no more than --reentry-win (default 3 since #26; 0 = off = #25)")
+    parser.add_argument("--late-entry-days", type=int, default=defaults.late_entry_days,
+                        help="buy a top-10 stock at the next open if it gave a valid entry in the last N trading days "
+                             "while it was not on the list and is still in its ATR up-trend (default 0 = off)")
     parser.add_argument("--list-memory", type=int, default=defaults.list_memory,
                         help="also look for the setup in stocks that were on the list on any of the last N trading "
                              "days, e.g. 21 = about a month (default 0 = only today's list)")
@@ -223,6 +226,7 @@ def main(argv=None):
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
         profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
+        late_entry_days=args.late_entry_days,
         list_memory_min_sctr=args.list_memory_min_sctr, list_memory_min_run=args.list_memory_min_run,
         list_memory_gap=args.list_memory_gap, list_memory_above_ma=args.list_memory_above_ma,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,

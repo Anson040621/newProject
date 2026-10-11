@@ -77,7 +77,7 @@ def test_default_rules_are_version_26():
     assert (rules.min_vol, rules.max_vol) == (0, 75) and rules.reentry_after_tp and not rules.red_line_stop
     assert (rules.climax_gain, rules.climax_stretch, rules.climax_ma, rules.climax_gap, rules.climax_days) == (0.40, 0.50, 100, 0.05, 10)
     assert not rules.climax_reentry and not rules.market_ma
-    assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor and not rules.list_memory
+    assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor and not rules.list_memory and not rules.late_entry_days
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -603,6 +603,20 @@ def test_list_memory_can_require_a_close_above_the_100_day_average():
     assert len(run(list_memory_above_ma=100)) == 1  # close 100 above the average of 90
     sigs["AAA"]["sma100"] = 110.0
     assert len(run(list_memory_above_ma=100)) == 0 and len(run()) == 1  # below its average: skipped
+
+
+def test_late_entry_after_a_valid_entry_made_off_the_list():
+    dates, prices, sigs, top = make_world([100] * 10, entry_day=-1)
+    sig = sigs["AAA"]
+    sig["trend"] = [-1, -1, -1] + [1] * 7  # down-trend until day 2 ...
+    sig.loc[dates[2], "setup"] = True  # ... setup at that close ...
+    sig.loc[dates[3], "flip_level"] = 99.0  # ... and day 3's high (101) reaches the flip level: a valid entry
+    top = top[top["date"] >= dates[5]]  # but the stock only joins the list on day 5
+    run = lambda **kw: strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, **kw))[1]
+    assert len(run()) == 0
+    assert len(run(late_entry_days=1)) == 0  # day 5 is 2 trading days after the valid entry
+    trades = run(late_entry_days=2)
+    assert list(trades["entry_date"]) == [dates[6]] and trades.iloc[0]["entry_kind"] == "setup-late"  # next open
 
 
 def test_extra_slots_for_stocks_outside_the_top_n():
