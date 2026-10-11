@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from backtest import signals, strategy
+from backtest import signals, strategy, twins
 
 
 def series(values, start="2024-01-01"):
@@ -78,6 +78,7 @@ def test_default_rules_are_version_26():
     assert (rules.climax_gain, rules.climax_stretch, rules.climax_ma, rules.climax_gap, rules.climax_days) == (0.40, 0.50, 100, 0.05, 10)
     assert not rules.climax_reentry and not rules.market_ma
     assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor and not rules.list_memory and not rules.late_entry_days
+    assert not rules.twin_days
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -617,6 +618,63 @@ def test_late_entry_after_a_valid_entry_made_off_the_list():
     assert len(run(late_entry_days=1)) == 0  # day 5 is 2 trading days after the valid entry
     trades = run(late_entry_days=2)
     assert list(trades["entry_date"]) == [dates[6]] and trades.iloc[0]["entry_kind"] == "setup-late"  # next open
+
+
+def twin_world(cross_days=5):
+    """One stock: flat at 200, a slide to 100, a base, a jump to 120 and a climb. Its setup close
+    comes `cross_days` days into the golden cross that follows, 10 days after an open 16% above the
+    previous close; its SCTR was 3 about 3-4 months earlier and is 75 now."""
+    closes = np.r_[[200.0] * 150, np.linspace(200, 100, 150), [100.0] * 40, np.linspace(120, 175, 80)]
+    dates = pd.bdate_range("2020-01-01", periods=len(closes))
+    close = pd.DataFrame({"AAA": closes}, index=dates)
+    evening = int(np.flatnonzero(twins.golden_cross_days(close)["AAA"].to_numpy() == cross_days)[0])
+    opens = close.shift(1).fillna(200.0)  # no gaps ...
+    opens.iloc[evening - 10] = close.iloc[evening - 11] * 1.16  # ... but one
+    sctr_table = pd.DataFrame({"AAA": 50.0}, index=dates)
+    sctr_table.iloc[evening - 80 : evening - 59] = 3.0
+    sctr_table.iloc[evening - 59 :] = 75.0
+    setup = pd.DataFrame({"AAA": False}, index=dates)
+    setup.iloc[evening] = True
+    flip_level = close * 1.005  # reached by the next day's high (1% above the close)
+    world = dict(closes=close, opens=opens, highs=close * 1.01, raw_closes=close, sctr_table=sctr_table, setup=setup,
+                 trend=pd.DataFrame({"AAA": -1}, index=dates), flip_level=flip_level)
+    assert 0.10 <= 1 - closes[evening] / 200 <= 0.30  # 10-30% below the 52-week high
+    return world, dates[evening]
+
+
+def test_twin_setup_needs_every_trait():
+    world, day = twin_world()
+    find = lambda **changes: twins.find_twins(**{**world, **changes})
+    found = find()
+    assert list(found["date"]) == [day] and list(found["ticker"]) == ["AAA"] and found["sctr"].iloc[0] == 75.0
+    assert find(trend=world["trend"].replace(-1, 1)).empty  # the ATR trail is already up: no setup
+    assert find(sctr_table=world["sctr_table"].replace(75.0, 95.0)).empty  # SCTR above 90: (nearly) on the list
+    assert find(sctr_table=world["sctr_table"].replace(3.0, 10.0)).empty  # its low was 10, not near the bottom
+    assert find(opens=world["closes"].shift(1).fillna(200.0)).empty  # no gap up
+    assert find(flip_level=world["closes"] * 1.05).empty  # the next day's high doesn't reach the buy-stop
+    world, day = twin_world(cross_days=20)
+    assert list(twins.find_twins(**world)["date"]) == [day]
+    world, _ = twin_world(cross_days=21)
+    assert twins.find_twins(**world).empty  # the golden cross is too old
+
+
+def test_twin_setups_join_the_list_for_n_days_ahead_of_the_top_10():
+    dates, prices, sigs, top = make_world([100] * 10, entry_day=4)  # setup on day 4, bought at the day-5 open
+    found = pd.DataFrame({"date": [dates[2]], "ticker": ["AAA"], "sctr": [75.0], "vol": [50.0]})
+    off_list = top.assign(vol=50.0).iloc[0:0]  # never in the top 10
+    run = lambda **kw: strategy.run(dates, prices, sigs, off_list, basic_rules(cost=0.0, **kw), twins=found)[1]
+    assert len(run()) == 0  # off by default
+    assert len(run(twin_days=2)) == 0  # on the list on days 2-3 only
+    trades = run(twin_days=3)
+    assert list(trades["entry_date"]) == [dates[5]] and trades.iloc[0]["entry_kind"] == "setup-twin"
+    assert len(run(twin_days=3, max_vol=40)) == 0  # the volatility limit applies to twins too
+    # One free slot, a setup on the same evening in the top 10 (TOP) and in the twin (AAA): the twin goes first.
+    prices, sigs = {"TOP": prices["AAA"], "AAA": prices["AAA"]}, {"TOP": sigs["AAA"], "AAA": sigs["AAA"]}
+    _, trades = strategy.run(dates, prices, sigs, top.assign(ticker="TOP"), basic_rules(cost=0.0, twin_days=3, max_positions=1),
+                             twins=found)
+    assert list(trades["ticker"]) == ["AAA"]
+    with pytest.raises(ValueError):  # needs the table of twin setups
+        strategy.run(dates, prices, sigs, top, basic_rules(twin_days=3))
 
 
 def test_extra_slots_for_stocks_outside_the_top_n():

@@ -51,6 +51,13 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
   Option --late-entry-days 10: a stock in today's top 10 that gave a valid entry (setup at a
           close, then the price reached the flip level) in the last 10 trading days while it
           was not on the list, and is still in its ATR up-trend: buy at the next open.
+  Option --twin-days 20: a setup outside the top 10 that looks like META's in Mar 2023 and
+          TER's in Sep 2025 (a "twin": SCTR 65-90 after a low of 5 or less in the last 6
+          months, up 50+ points in 60 days, a 15%+ gap up in the last 3 months, a golden
+          cross at most 20 days old, 10-30% below the 52-week high, and the next day's high
+          reaches the buy-stop; see backtest/twins.py) puts the stock on the list from that
+          evening for 20 trading days, ahead of the top 10 when slots are short. The
+          volatility limit applies to twins too.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -125,6 +132,7 @@ class Rules:
     list_memory_min_run: int = 0  # ... only if they were on the list this many trading days in a row before leaving
     list_memory_gap: int = 5  # ... breaks of up to this many trading days don't end a run on the list
     list_memory_above_ma: int = 0  # ... only while the setup close is above this SMA (50 or 100; 0 = off)
+    twin_days: int = 0  # twin setups (META Mar 2023 / TER Sep 2025 look-alikes) join the list for N trading days (0 = off)
     reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
     reentry_max_losses: int = 3  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off = #25)
     reentry_win: float = 0.20  # ... a win = a trade that made more than this (0.20 = +20%); anything less counts as a loss
@@ -199,12 +207,14 @@ def run(
     rules: Rules = Rules(),
     park: pd.DataFrame | None = None,
     market: pd.Series | None = None,
+    twins: pd.DataFrame | None = None,
 ) -> tuple[pd.Series, pd.DataFrame]:
     """Simulate the strategy.
 
     prices:  ticker -> DataFrame(open, high, low, close) on the full trading calendar
     signals: ticker -> output of signals.ticker_signals on the same calendar
     top:     daily top-N table (date, rank, ticker, sctr)
+    twins:   for rules.twin_days, the twin setup closes (date, ticker, sctr, vol), see backtest/twins.py
     park:    optional DataFrame(open, close) of a total-return ETF (e.g. QQQ) on the
              same calendar. All money not in a trade is held in it: buying a stock
              sells the ETF, selling a stock buys it back (rules.park_cost per move).
@@ -254,6 +264,33 @@ def run(
                 rows = pd.DataFrame({"date": d, "rank": 10**6, "ticker": [t for _, t in recent],
                                      "sctr": [s for s, _ in recent], "recent": True})
                 top_by_day[d] = rows if g is None else pd.concat([g.assign(recent=False), rows], ignore_index=True)
+    if rules.twin_days:
+        # Twin setups put the stock on the list from that evening for N trading days, ahead of
+        # the top 10 (highest SCTR first among twins), unless it is on the list anyway.
+        if twins is None:
+            raise ValueError("twin_days needs the table of twin setups (see run_backtest.prepare)")
+        if (rules.min_vol or rules.max_vol) and "vol" not in twins.columns:
+            raise ValueError("min_vol / max_vol need a 'vol' column in the twins table")
+        if rules.min_vol:
+            twins = twins[twins["vol"] > rules.min_vol]
+        if rules.max_vol:
+            twins = twins[twins["vol"] < rules.max_vol]
+        twin_rows: dict[pd.Timestamp, dict[str, float]] = {}
+        for i, t, s in zip(dates.get_indexer(twins["date"]), twins["ticker"], twins["sctr"]):
+            if i >= 0 and t in signals:
+                for d in dates[i:i + rules.twin_days]:
+                    twin_rows.setdefault(d, {})[t] = s  # a later twin evening refreshes the SCTR
+        for d, rows in twin_rows.items():
+            g = top_by_day.get(d)
+            rows = {t: s for t, s in rows.items() if g is None or t not in set(g["ticker"])}
+            if rows:
+                add = pd.DataFrame({"date": d, "rank": 0, "ticker": list(rows), "sctr": list(rows.values()), "twin": True})
+                add = add.sort_values("sctr", ascending=False)
+                top_by_day[d] = add if g is None else pd.concat([add, g.assign(twin=False)], ignore_index=True)
+        for d, g in top_by_day.items():
+            flags = {"twin", "recent"} & set(g.columns)  # rows from the other source have NaN there
+            if flags:
+                top_by_day[d] = g.assign(**{col: g[col].eq(True) for col in flags})
     reentry_ok = {d: set(g.loc[g["rank"] <= rules.reentry_top, "ticker"]) for d, g in top.groupby("date")}
 
     cash = rules.capital
@@ -543,7 +580,8 @@ def run(
                 # N days and have since sold; now the same setup with a dim green bar counts too.
                 since = day_number - setup_entries.get(row.ticker, -10**9)
                 kind = "dim-green" if rules.dim_green_days and since <= rules.dim_green_days else None
-                setup = "setup-recent" if getattr(row, "recent", False) else "setup"  # --list-memory
+                setup = ("setup-twin" if getattr(row, "twin", False)  # --twin-days
+                         else "setup-recent" if getattr(row, "recent", False) else "setup")  # --list-memory
                 if not rules.entry_on_touch and bool(sig.at[day, "entry_setup"]):
                     candidates.append((row.ticker, row.sctr, setup))
                 elif rules.entry_on_touch and sig.at[day, "trend"] != 1 and (

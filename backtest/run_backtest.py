@@ -13,7 +13,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from . import sctr, signals, strategy
+from . import sctr, signals, strategy, twins
 from .pick_stocks import build_inputs
 from .prices import load_ohlc
 from .universe import DATA_DIR
@@ -42,27 +42,48 @@ def load_benchmark(start, symbol: str = "SPY") -> pd.Series:
     return load_etf(symbol)["close"].loc[start:]
 
 
-def prepare(start, end, top_n: int = 10, require_squeeze: bool = True):
-    """Daily top N, the trading calendar, OHLC prices and signals for every ticker that ever made the top N."""
+def prepare(start, end, top_n: int = 10, require_squeeze: bool = True, find_twins: bool = False):
+    """Daily top N, the trading calendar, OHLC prices and signals for every ticker that ever made the top N.
+
+    With find_twins, also the twin setups (backtest/twins.py) of every stock in the universe, with
+    their prices and signals; that needs every stock's chart, so it takes a few minutes. Otherwise None.
+    """
     inputs = build_inputs(start, end, "largecap")
     top = sctr.daily_top_n(inputs.closes, inputs.mask, n=top_n)
     top = top[top["date"] >= pd.Timestamp(start)].reset_index(drop=True)
     # Volatility over the last year (252 trading days), annualised, in % - for --min-vol / --max-vol.
     vol = inputs.closes.pct_change().rolling(252, min_periods=200).std() * np.sqrt(252) * 100
-    top["vol"] = vol.to_numpy()[vol.index.get_indexer(top["date"]), vol.columns.get_indexer(top["ticker"])]
+    lookup = lambda frame, table: frame.to_numpy()[frame.index.get_indexer(table["date"]), frame.columns.get_indexer(table["ticker"])]
+    top["vol"] = lookup(vol, top)
     dates = inputs.closes.loc[start:end].index
 
     tickers = sorted(top["ticker"].unique())
+    if find_twins:
+        tickers = sorted(set(tickers) | {t for t in inputs.closes.columns if inputs.mask[t].loc[start:end].any()})
     ohlc = load_ohlc(tickers)
-    prices, sigs = {}, {}
+    prices, sigs, full = {}, {}, {}
     for ticker, frame in ohlc.items():
-        sigs[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze,
-                                              open_=frame["open"]).reindex(dates)
+        full[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze,
+                                              open_=frame["open"])
+        sigs[ticker] = full[ticker].reindex(dates)
         prices[ticker] = frame.reindex(dates)
     for frame in sigs.values():
         for col in ("setup", "entry_setup", "setup_dim_green", "atr_buy", "atr_exit"):
             frame[col] = frame[col].fillna(False).astype(bool)
-    return dates, prices, sigs, top
+
+    twin_setups = None
+    if find_twins:
+        wide = lambda get: pd.DataFrame({t: get(t) for t in ohlc}).reindex(inputs.closes.index)
+        table = sctr.rank_scores(sctr.indicator_score(inputs.closes), inputs.mask)
+        twin_setups = twins.find_twins(inputs.closes, wide(lambda t: ohlc[t]["open"]), wide(lambda t: ohlc[t]["high"]),
+                                       wide(lambda t: ohlc[t]["close"]), table, wide(lambda t: full[t]["setup"]),
+                                       wide(lambda t: full[t]["trend"]), wide(lambda t: full[t]["flip_level"]))
+        twin_setups = twin_setups[twin_setups["date"].between(dates[0], dates[-1])].reset_index(drop=True)
+        twin_setups["vol"] = lookup(vol, twin_setups)
+        keep = set(top["ticker"]) | set(twin_setups["ticker"])  # nobody else can be bought
+        prices = {t: f for t, f in prices.items() if t in keep}
+        sigs = {t: f for t, f in sigs.items() if t in keep}
+    return dates, prices, sigs, top, twin_setups
 
 
 def market_ok(dates, days: int = 200) -> pd.Series:
@@ -168,6 +189,9 @@ def main(argv=None):
                         help="breaks of up to this many trading days don't end a run on the list (default 5)")
     parser.add_argument("--list-memory-above-ma", type=int, default=defaults.list_memory_above_ma,
                         help="with --list-memory: only while the setup close is above this SMA, 50 or 100 (default 0 = off)")
+    parser.add_argument("--twin-days", type=int, default=defaults.twin_days,
+                        help="twin setups outside the top 10 (META Mar 2023 / TER Sep 2025 look-alikes, see "
+                             "backtest/twins.py) put the stock on the list for N trading days, e.g. 20 (default 0 = off)")
     parser.add_argument("--profit-floor", type=float, default=defaults.profit_floor,
                         help="after +8%%: once the trade has been up --profit-floor-after at a close, sell the rest "
                              "after a close below this gain, e.g. 0.10 = +10%% (default 0 = off)")
@@ -226,7 +250,7 @@ def main(argv=None):
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
         profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
-        late_entry_days=args.late_entry_days,
+        late_entry_days=args.late_entry_days, twin_days=args.twin_days,
         list_memory_min_sctr=args.list_memory_min_sctr, list_memory_min_run=args.list_memory_min_run,
         list_memory_gap=args.list_memory_gap, list_memory_above_ma=args.list_memory_above_ma,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
@@ -234,10 +258,10 @@ def main(argv=None):
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     ranks = 10**4 if args.extra_slots or args.list_memory_min_sctr else max(args.top, args.reentry_top)
-    dates, prices, sigs, top = prepare(args.start, args.end, ranks, not args.no_squeeze)
+    dates, prices, sigs, top, twin_setups = prepare(args.start, args.end, ranks, not args.no_squeeze, bool(args.twin_days))
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
     market = market_ok(dates, args.market_ma) if args.market_ma else None
-    equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park, market=market)
+    equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park, market=market, twins=twin_setups)
     spy = load_benchmark(args.start)
 
     stats = strategy.summary(equity, trades, spy)
