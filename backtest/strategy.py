@@ -40,6 +40,9 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           No more re-buys of a stock after 3 trades in a row (its setup buy and the
           re-buys after it) that made no more than 20% (--reentry-max-losses,
           0 = off = #25; --reentry-win); a new setup buy starts the count again.
+  Option --list-memory N: also look for the setup in stocks that were on the list (top
+          10, SCTR above 90, volatility limit) on any of the last N trading days, even if
+          they have dropped out since; their orders come after today's top 10.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -108,6 +111,7 @@ class Rules:
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
+    list_memory: int = 0  # also stocks that were on the list on any of the last N trading days (0 = off)
     reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
     reentry_max_losses: int = 3  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off = #25)
     reentry_win: float = 0.20  # ... a win = a trade that made more than this (0.20 = +20%); anything less counts as a loss
@@ -207,6 +211,20 @@ def run(
     if rules.max_vol:
         top = top[top["vol"] < rules.max_vol]
     top_by_day = {d: g[g["rank"] <= listed].sort_values("rank") for d, g in top.groupby("date")}
+    if rules.list_memory:
+        # Stocks that were on the list in the last N trading days but not today, after today's
+        # list, highest last SCTR first ("recent" rows).
+        last_listed: dict[str, tuple[int, float]] = {}
+        for i, d in enumerate(dates):
+            g = top_by_day.get(d)
+            if g is not None:
+                last_listed.update((t, (i, s)) for t, s in zip(g["ticker"], g["sctr"]))
+            last_listed = {t: v for t, v in last_listed.items() if i - v[0] <= rules.list_memory}
+            recent = sorted(((s, t) for t, (j, s) in last_listed.items() if j < i), reverse=True)
+            if recent:
+                rows = pd.DataFrame({"date": d, "rank": 10**6, "ticker": [t for _, t in recent],
+                                     "sctr": [s for s, _ in recent], "recent": True})
+                top_by_day[d] = rows if g is None else pd.concat([g.assign(recent=False), rows], ignore_index=True)
     reentry_ok = {d: set(g.loc[g["rank"] <= rules.reentry_top, "ticker"]) for d, g in top.groupby("date")}
 
     cash = rules.capital
@@ -481,14 +499,15 @@ def run(
                 # N days and have since sold; now the same setup with a dim green bar counts too.
                 since = day_number - setup_entries.get(row.ticker, -10**9)
                 kind = "dim-green" if rules.dim_green_days and since <= rules.dim_green_days else None
+                setup = "setup-recent" if getattr(row, "recent", False) else "setup"  # --list-memory
                 if not rules.entry_on_touch and bool(sig.at[day, "entry_setup"]):
-                    candidates.append((row.ticker, row.sctr, "setup"))
+                    candidates.append((row.ticker, row.sctr, setup))
                 elif rules.entry_on_touch and sig.at[day, "trend"] != 1 and (
                         rules.entry_check != "prev" or bool(sig.at[day, "setup"])):
                     # Order for tomorrow at the flip level. "watch": the squeeze and red bar are
                     # checked live tomorrow, as the price rises through the line.
                     ready = bool(sig.at[day, "setup"]) and rules.entry_check != "live"
-                    candidates.append((row.ticker, row.sctr, "setup" if ready else "watch"))
+                    candidates.append((row.ticker, row.sctr, setup if ready else "watch"))
                 elif (rules.entry_on_touch and rules.close_entry and bool(sig.at[day, "entry_setup"])
                         and row.ticker not in entered_today):
                     # The squeeze / red bar only appeared on the BUY bar itself, so no order was

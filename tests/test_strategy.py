@@ -77,7 +77,7 @@ def test_default_rules_are_version_26():
     assert (rules.min_vol, rules.max_vol) == (0, 75) and rules.reentry_after_tp and not rules.red_line_stop
     assert (rules.climax_gain, rules.climax_stretch, rules.climax_ma, rules.climax_gap, rules.climax_days) == (0.40, 0.50, 100, 0.05, 10)
     assert not rules.climax_reentry and not rules.market_ma
-    assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor
+    assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor and not rules.list_memory
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -562,6 +562,16 @@ def test_profit_floor_sells_the_rest_after_a_round_trip():
     assert "profit-floor" not in trades.iloc[0]["exits"]  # off by default
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, profit_floor=0.10, profit_floor_after=0.30))
     assert "profit-floor" not in trades.iloc[0]["exits"]  # never up 30%
+
+
+def test_list_memory_allows_stocks_that_left_the_list_recently():
+    dates, prices, sigs, top = make_world([100] * 10, entry_day=6)
+    top = top[top["date"] <= dates[2]]  # on the list on days 0-2 only; the setup shows on day 6
+    run = lambda **kw: strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, **kw))[1]
+    assert len(run()) == 0  # not on today's list
+    assert len(run(list_memory=3)) == 0  # last on the list 4 trading days earlier
+    trades = run(list_memory=5)
+    assert list(trades["entry_date"]) == [dates[7]] and trades.iloc[0]["entry_kind"] == "setup-recent"
 
 
 def test_extra_slots_for_stocks_outside_the_top_n():

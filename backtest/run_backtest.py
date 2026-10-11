@@ -153,6 +153,9 @@ def main(argv=None):
     parser.add_argument("--reentry-max-losses", type=int, default=defaults.reentry_max_losses,
                         help="stop re-buying a stock after N trades in a row (its setup buy and the re-buys after it) "
                              "that made no more than --reentry-win (default 3 since #26; 0 = off = #25)")
+    parser.add_argument("--list-memory", type=int, default=defaults.list_memory,
+                        help="also look for the setup in stocks that were on the list on any of the last N trading "
+                             "days, e.g. 21 = about a month (default 0 = only today's list)")
     parser.add_argument("--profit-floor", type=float, default=defaults.profit_floor,
                         help="after +8%%: once the trade has been up --profit-floor-after at a close, sell the rest "
                              "after a close below this gain, e.g. 0.10 = +10%% (default 0 = off)")
@@ -210,7 +213,7 @@ def main(argv=None):
         climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
-        profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after,
+        profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
