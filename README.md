@@ -142,6 +142,13 @@ $427k (13.2% a year, worst drawdown -22.8%, 254 trades, 44% winners, profit fact
 #14 (+2% entry, stop-only exit) returned 1.0% a year and #15 (#14 + 12% hard
 stop) -0.9%: the +2% entry skipped 7 of the 12 biggest winners.
 
+Backup to revisit later: #26 with `--list-memory 21 --list-memory-min-run 63` (also
+buy the setup in a stock that dropped out of the top 10 within the last month, if it
+had been in the top 10 for 3 months in a row before, breaks of up to 5 trading days
+allowed): $894k (20.5% a year, worst drawdown -24.0%, Sharpe 1.24, 344 trades, profit
+factor 2.93) vs #26's $908k; it adds 18 trades (39% winners, +$3k in total, e.g. SMCI
+Dec 2023 +58%) and keeps 2024 at +90% (#26: +78%) but 2026 at +34% (#26: +48%).
+
 Version G results:
 2015-01-02 to 2026-10-02: $100k -> $254k (8.3% a year, worst drawdown -36%,
 344 trades, 45% winners) vs SPY 13.8% a year. Most of the gain came in 2020
