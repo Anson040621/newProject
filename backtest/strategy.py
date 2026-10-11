@@ -44,7 +44,9 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           10, SCTR above 90, volatility limit) on any of the last N trading days, even if
           they have dropped out since; their orders come after today's top 10.
           --list-memory-min-sctr 50: forget such a stock once its SCTR closes below 50
-          (until it is back on the list).
+          (until it is back on the list). --list-memory-min-run 42: only stocks that had
+          been on the list for 42 trading days in a row before they left (breaks of up
+          to 5 trading days allowed, --list-memory-gap).
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -115,6 +117,8 @@ class Rules:
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     list_memory: int = 0  # also stocks that were on the list on any of the last N trading days (0 = off) ...
     list_memory_min_sctr: float = 0.0  # ... forgotten once their SCTR closes below this (needs every stock's SCTR)
+    list_memory_min_run: int = 0  # ... only if they were on the list this many trading days in a row before leaving
+    list_memory_gap: int = 5  # ... breaks of up to this many trading days don't end a run on the list
     reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
     reentry_max_losses: int = 3  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off = #25)
     reentry_win: float = 0.20  # ... a win = a trade that made more than this (0.20 = +20%); anything less counts as a loss
@@ -222,17 +226,21 @@ def run(
     if rules.list_memory:
         # Stocks that were on the list in the last N trading days but not today, after today's
         # list, highest last SCTR first ("recent" rows).
-        last_listed: dict[str, tuple[int, float]] = {}
+        last_listed: dict[str, tuple[int, float, int]] = {}  # ticker -> (last day on the list, its SCTR, run start)
         for i, d in enumerate(dates):
             g = top_by_day.get(d)
             if g is not None:
-                last_listed.update((t, (i, s)) for t, s in zip(g["ticker"], g["sctr"]))
+                for t, s in zip(g["ticker"], g["sctr"]):
+                    prev = last_listed.get(t)
+                    start = prev[2] if prev is not None and i - prev[0] <= rules.list_memory_gap + 1 else i
+                    last_listed[t] = (i, s, start)
             last_listed = {t: v for t, v in last_listed.items() if i - v[0] <= rules.list_memory}
             if all_sctr is not None:
                 today_sctr = all_sctr.loc[d] if d in all_sctr.index else pd.Series(dtype=float)
                 last_listed = {t: v for t, v in last_listed.items()
                                if v[0] == i or today_sctr.get(t, np.nan) >= rules.list_memory_min_sctr}
-            recent = sorted(((s, t) for t, (j, s) in last_listed.items() if j < i), reverse=True)
+            recent = sorted(((s, t) for t, (j, s, start) in last_listed.items()
+                             if j < i and j - start + 1 >= rules.list_memory_min_run), reverse=True)
             if recent:
                 rows = pd.DataFrame({"date": d, "rank": 10**6, "ticker": [t for _, t in recent],
                                      "sctr": [s for s, _ in recent], "recent": True})

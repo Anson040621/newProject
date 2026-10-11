@@ -586,6 +586,15 @@ def test_list_memory_forgets_a_stock_whose_sctr_falls_below_the_floor():
         strategy.run(dates, prices, sigs, top[top["rank"] == 1], basic_rules(list_memory=5, list_memory_min_sctr=50))
 
 
+def test_list_memory_needs_a_long_enough_run_on_the_list():
+    dates, prices, sigs, top = make_world([100] * 12, entry_day=8)
+    top = top[top["date"].isin(dates[[0, 1, 2, 4, 5]])]  # on the list on days 0-2 and 4-5, then off
+    run = lambda **kw: strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, list_memory=5, **kw))[1]
+    assert len(run(list_memory_min_run=6)) == 1  # days 0-5 count as one 6-day run (the 1-day break is short)
+    assert len(run(list_memory_min_run=7)) == 0
+    assert len(run(list_memory_min_run=6, list_memory_gap=0)) == 0  # no breaks allowed: the run is days 4-5
+
+
 def test_extra_slots_for_stocks_outside_the_top_n():
     # Three stocks signal on the same day, ranked #1, #15 and #20 (all SCTR above 90).
     dates, prices, sigs, top = make_world([100] * 5, entry_day=1)
