@@ -1,7 +1,7 @@
 """Step 2-4 - the trading rules and a day-by-day portfolio simulation.
 
-Rules (defaults = version #25 = #24 with a big red candle as a second climax trigger; #24 =
-#23 with the climax exit; #23 = #22 without the break-even exit and with re-entry after any
+Rules (defaults = version #26 = #25 with no more re-buys after 3 trades in a row without a
+win; #25 = #24 with a big red candle as a second climax trigger; #24 = #23 with the climax exit; #23 = #22 without the break-even exit and with re-entry after any
 exit; #22 = #21 with a 75% volatility limit on the stocks):
   Stocks  the day's SCTR top 10 among US stocks over $10B (all score above 90),
           skipping stocks whose volatility over the last year (252 trading days,
@@ -34,9 +34,9 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           within 5 trading days of the exit: buy-stop at the flip level (no other
           conditions; --reentry-top N: only while the stock is in the top N).
           Option --no-reentry-after-tp (#22): only after exits before +8%.
-          Option --reentry-max-losses N: stop re-buying a stock after N trades in a
-          row (its setup buy and the re-buys after it) that made no more than 20%
-          (--reentry-win); a new setup buy starts the count again.
+          No more re-buys of a stock after 3 trades in a row (its setup buy and the
+          re-buys after it) that made no more than 20% (--reentry-max-losses,
+          0 = off = #25; --reentry-win); a new setup buy starts the count again.
   Option --entry-check live: every evening a buy order waits at the flip level for
           each top-10 stock in an ATR down-trend; the next day it buys at the first
           price, on the way up through the line, at which the squeeze is on and the
@@ -106,7 +106,7 @@ class Rules:
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     reentry_after_tp: bool = True  # ... also after exits that came after the +8% partial
-    reentry_max_losses: int = 0  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off)
+    reentry_max_losses: int = 3  # ... no more re-buys after N trades in a row (setup buy + re-buys) that did not win (0 = off = #25)
     reentry_win: float = 0.20  # ... a win = a trade that made more than this (0.20 = +20%); anything less counts as a loss
     extra_slots: int = 0  # also buy stocks above min_sctr outside the top N, at most this many at a time (0 = off)
     min_vol: float = 0.0  # only stocks whose 1-year volatility (% a year, column "vol") is above this (0 = off)

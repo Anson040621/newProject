@@ -152,7 +152,7 @@ def main(argv=None):
                         help="re-entries only while the stock is in the daily SCTR top N (default 0 = any rank)")
     parser.add_argument("--reentry-max-losses", type=int, default=defaults.reentry_max_losses,
                         help="stop re-buying a stock after N trades in a row (its setup buy and the re-buys after it) "
-                             "that made no more than --reentry-win (default 0 = off)")
+                             "that made no more than --reentry-win (default 3 since #26; 0 = off = #25)")
     parser.add_argument("--reentry-win", type=float, default=defaults.reentry_win,
                         help="with --reentry-max-losses: a trade must make more than this to count as a win "
                              "(default 0.20 = +20%%)")

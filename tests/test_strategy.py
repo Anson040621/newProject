@@ -59,12 +59,13 @@ def basic_rules(**overrides):
     settings = dict(entry_on_touch=False, ema_exit_days=1, reentry_days=0, atr_exit_on_touch=False,
                     atr_stop_buffer=0.0, sticky_stop=False, close_exit=False, entry_buffer=0.0, emergency_stop=0.0,
                     breakeven_exit=False, breakeven_buffer=0.0, rest_exit="ema20", failed_breakout_exit=False,
-                    rest_exit_delay=0, max_vol=0, reentry_after_tp=False, climax_gain=0.0, climax_body=0.0)
+                    rest_exit_delay=0, max_vol=0, reentry_after_tp=False, climax_gain=0.0, climax_body=0.0,
+                    reentry_max_losses=0)
     settings.update(overrides)
     return strategy.Rules(**settings)
 
 
-def test_default_rules_are_version_25():
+def test_default_rules_are_version_26():
     rules = strategy.Rules()
     assert (rules.top_n, rules.position_size, rules.max_positions, rules.take_profit) == (10, 0.15, 6, 0.08)
     assert (rules.entry_on_touch, rules.entry_buffer, rules.ema_exit_days, rules.reentry_days) == (True, 0.0, 3, 5)
@@ -75,7 +76,8 @@ def test_default_rules_are_version_25():
     assert rules.breakeven_buffer == 0.03 and rules.entry_check == "prev" and rules.rest_exit_delay == 21
     assert (rules.min_vol, rules.max_vol) == (0, 75) and rules.reentry_after_tp and not rules.red_line_stop
     assert (rules.climax_gain, rules.climax_stretch, rules.climax_ma, rules.climax_gap, rules.climax_days) == (0.40, 0.50, 100, 0.05, 10)
-    assert not rules.climax_reentry and not rules.market_ma and rules.reentry_max_losses == 0
+    assert not rules.climax_reentry and not rules.market_ma
+    assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20)
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
