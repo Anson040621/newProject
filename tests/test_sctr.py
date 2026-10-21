@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from backtest import sctr
+from backtest import prices
 from backtest.prices import load_closes
 from backtest.universe import load_membership, members_on, membership_mask, tickers_between
 
@@ -126,7 +127,15 @@ def test_score_requires_min_history():
 def test_rank_scores_spread_0_to_99_9():
     score = frame(A=[1.0], B=[5.0], C=[3.0])
     ranked = sctr.rank_scores(score).iloc[0]
-    assert ranked.to_dict() == {"A": 0.0, "B": 99.9, "C": 50.0}
+    # C sits exactly in the middle: 49.95, truncated to 49.9 like StockCharts.
+    assert ranked.to_dict() == {"A": 0.0, "B": 99.9, "C": 49.9}
+
+
+def test_rank_scores_truncates_like_stockcharts():
+    # With ~912 stocks the 2nd best is 99.79... which StockCharts shows as 99.7.
+    score = pd.DataFrame([np.arange(912.0)], index=pd.bdate_range("2024-01-01", periods=1))
+    ranked = sctr.rank_scores(score).iloc[0].sort_values(ascending=False)
+    assert list(ranked.iloc[:3]) == [99.9, 99.7, 99.6]
 
 
 def test_rank_scores_respects_universe_mask():
@@ -156,8 +165,11 @@ def test_sctr_table_columns():
     cols = {f"S{i}": random_walk(300, drift=0.0005 * i, seed=i) for i in range(5)}
     close = frame(**cols)
     table = sctr.sctr_table(close, close.index[-1])
-    assert list(table.columns) == ["sctr", "score", "pct_ema200", "roc125", "pct_ema50", "roc20", "ppo_points", "rsi14"]
+    assert list(table.columns) == [
+        "sctr", "chg", "score", "pct_ema200", "roc125", "pct_ema50", "roc20", "ppo_points", "rsi14"]
     assert table["score"].is_monotonic_decreasing
+    previous = sctr.rank_scores(sctr.indicator_score(close)).iloc[-2]
+    assert (table["chg"] == (table["sctr"] - previous.reindex(table.index)).round(1)).all()
 
 
 # --- universe and price loading ----------------------------------------------
@@ -183,3 +195,35 @@ def test_load_closes_yahoo_and_tradingview_formats(tmp_path):
     closes = load_closes(prices_dir=tmp_path)
     assert list(closes.columns) == ["AAA", "BBB", "CCC"]
     assert closes.loc["2024-01-03"].to_dict() == {"AAA": 11.0, "BBB": 21.0, "CCC": 41.0}
+
+
+def test_fill_latest_session_appends_missing_close(tmp_path, monkeypatch):
+    (tmp_path / "AAA.csv").write_text(
+        "Date,Open,High,Low,Close,Adj Close,Volume,Stock Splits\n2026-10-01,1,1,1,10,9.5,100,0.0\n")
+    (tmp_path / "BBB.csv").write_text(
+        "Date,Open,High,Low,Close,Adj Close,Volume,Stock Splits\n2026-10-02,1,1,1,20,20,100,0.0\n")
+    quote = {"Date": pd.Timestamp("2026-10-02"), "Open": np.nan, "High": 11.0, "Low": 9.0,
+             "Close": 10.5, "Adj Close": 10.5, "Volume": 200.0, "Stock Splits": 0.0}
+    monkeypatch.setattr(prices, "_session_quote", lambda ticker: dict(quote))
+    assert prices.fill_latest_session(["AAA", "BBB"], tmp_path) == 1  # BBB already has the day
+    data = prices.load_prices(prices_dir=tmp_path)
+    assert data["close"].loc["2026-10-02"].to_dict() == {"AAA": 10.5, "BBB": 20.0}
+    assert data["adj_close"].loc["2026-10-01", "AAA"] == 9.5
+
+
+def test_session_quote_needs_a_finished_session(monkeypatch):
+    import io
+    import json
+
+    def fake_meta(when):
+        meta = {"regularMarketPrice": 333.69, "regularMarketTime": when, "regularMarketDayHigh": 334.54,
+                "regularMarketDayLow": 330.61, "regularMarketVolume": 31878433,
+                "exchangeTimezoneName": "America/New_York",
+                "currentTradingPeriod": {"regular": {"start": 1790947800, "end": 1790971200}}}
+        return lambda request, timeout: io.BytesIO(json.dumps({"chart": {"result": [{"meta": meta}]}}).encode())
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_meta(1790971201))  # 16:00:01 New York time
+    quote = prices._session_quote("AAPL")
+    assert quote["Date"] == pd.Timestamp("2026-10-02") and quote["Close"] == 333.69
+    monkeypatch.setattr("urllib.request.urlopen", fake_meta(1790960000))  # 12:53, market still open
+    assert prices._session_quote("AAPL") is None

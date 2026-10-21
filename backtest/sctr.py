@@ -19,6 +19,7 @@ one row per trading day (DatetimeIndex, ascending).
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 # StockCharts needs roughly a year of history before a stock gets an SCTR.
@@ -127,15 +128,22 @@ def rank_scores(score: pd.DataFrame, universe_mask: pd.DataFrame | None = None) 
     ranks = score.rank(axis=1, method="average")
     count = score.notna().sum(axis=1)
     sctr = (ranks - 1.0).div((count - 1).clip(lower=1), axis=0) * 99.9
-    return sctr.round(1)
+    # StockCharts truncates to one decimal (99.79 shows as 99.7).
+    return np.floor(sctr * 10 + 1e-9) / 10
 
 
 def sctr_table(close: pd.DataFrame, date, universe_mask: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Full SCTR breakdown for every eligible ticker on one date, best first."""
+    """Full SCTR breakdown for every eligible ticker on one date, best first.
+
+    `chg` is the change in SCTR since the previous trading day, like the CHG
+    column in StockCharts' SCTR report.
+    """
     score = indicator_score(close)
     sctr = rank_scores(score, universe_mask)
     comps = components(close)
-    table = pd.DataFrame({"sctr": sctr.loc[date], "score": score.loc[date]})
+    position = sctr.index.get_loc(date)
+    previous = sctr.iloc[position - 1] if position > 0 else sctr.loc[date] * float("nan")
+    table = pd.DataFrame({"sctr": sctr.loc[date], "chg": (sctr.loc[date] - previous).round(1), "score": score.loc[date]})
     for name, frame in comps.items():
         table[name] = frame.loc[date]
     table = table.dropna(subset=["sctr"]).sort_values("score", ascending=False)
