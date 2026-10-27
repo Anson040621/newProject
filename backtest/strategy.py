@@ -22,6 +22,10 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
             b) safety net: the price touches 2% below the previous close's green
                line: sell everything at once (at the open if it gaps below).
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
+                      Option --take-profit-fraction 0: sell nothing there; the rest exit
+                      below still takes over from +8%. Option --take-profit2 0.25
+                      (--take-profit2-fraction 0.25): also sell 1/4 of the original shares
+                      when the price reaches +25%, the same way.
           after +8%:  sell the rest at the next open after a close more than 3%
                       below the 50-day SMA, once price has closed above that level
                       since entry and from 21 trading days after the entry or
@@ -119,7 +123,9 @@ class Rules:
     position_size: float = 0.15
     max_positions: int = 6
     take_profit: float = 0.08
-    take_profit_fraction: float = 1 / 3
+    take_profit_fraction: float = 1 / 3  # share sold at take_profit (0 = none: only the switch to the rest exit)
+    take_profit2: float = 0.0  # a second partial sale when the high reaches this gain (e.g. 0.25; 0 = off) ...
+    take_profit2_fraction: float = 0.25  # ... of the original shares
     ema_exit_days: int = 3  # consecutive closes below the 20 EMA before selling the rest
     atr_exit_on_touch: bool = True  # before +8%: sell the moment price touches the ATR stop (see buffer)
     entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
@@ -182,6 +188,7 @@ class Position:
     initial_shares: int
     sctr: float
     tp_taken: bool = False
+    tp2_taken: bool = False
     armed: bool = False  # has closed above the rest-exit line (20 EMA or 50 SMA level) since entry
     closes_below_ema: int = 0  # consecutive closes below that line
     days_without_price: int = 0
@@ -474,17 +481,24 @@ def run(
                 sell(pos, pos.shares, min(stop, open_) if open_ is not None else stop, day, "red-line-stop")
                 close_out(pos, day)
 
-        # 2b. Intraday: take 1/3 profit when the high reaches +8%.
+        # 2b. Intraday: take 1/3 profit when the high reaches +8% (and the optional second
+        #     partial sale at take_profit2).
         for pos in list(positions.values()):
             high, open_ = px(pos.ticker, day, "high"), px(pos.ticker, day, "open")
-            target = pos.entry_price * (1 + rules.take_profit)
-            if not pos.tp_taken and high is not None and high >= target:
-                fill = max(target, open_) if open_ is not None and day != pos.entry_date else target
-                qty = max(1, round(pos.initial_shares * rules.take_profit_fraction))
-                sell(pos, min(qty, pos.shares), fill, day, "take-profit")
-                pos.tp_taken = True
+            if high is None:
+                continue
+            for level, fraction, attr, reason in ((rules.take_profit, rules.take_profit_fraction, "tp_taken", "take-profit"),
+                                                  (rules.take_profit2, rules.take_profit2_fraction, "tp2_taken", "take-profit-2")):
+                target = pos.entry_price * (1 + level)
+                if (attr == "tp2_taken" and (not rules.take_profit2 or not pos.tp_taken)) or getattr(pos, attr) or high < target:
+                    continue
+                setattr(pos, attr, True)  # with a fraction of 0 nothing is sold, but the rest exit takes over
+                if fraction > 0:
+                    fill = max(target, open_) if open_ is not None and day != pos.entry_date else target
+                    sell(pos, min(max(1, round(pos.initial_shares * fraction)), pos.shares), fill, day, reason)
                 if pos.shares == 0:
                     close_out(pos, day)
+                    break
 
         # 2c. The parking ETF's open -> close return on whatever is still idle at the close
         #     (cash from intraday trades counts as idle for the whole day).

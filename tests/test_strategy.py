@@ -79,6 +79,7 @@ def test_default_rules_are_version_26():
     assert not rules.climax_reentry and not rules.market_ma
     assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor and not rules.list_memory and not rules.late_entry_days
     assert not rules.twin_days
+    assert (rules.take_profit_fraction, rules.take_profit2) == (1 / 3, 0.0)
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -143,6 +144,19 @@ def test_ignores_atr_exit_after_take_profit_and_respects_max_positions():
     top = pd.concat([top.assign(ticker=f"T{i}", rank=i + 1, sctr=99.9 - i) for i in range(7)])
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0))
     assert sorted(trades["ticker"]) == [f"T{i}" for i in range(6)]
+
+
+def test_second_partial_sale_and_nothing_sold_at_the_first_target():
+    closes = [100, 100, 100, 109, 126, 127]
+    exits = [False, False, False, False, True, False]  # a close below the green line after +8%: ignored
+    dates, prices, sigs, top = make_world(closes, entry_day=1, exit_flags=exits)
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, take_profit2=0.25))
+    assert trades.iloc[0]["exits"].split("; ")[:2] == [f"{dates[3].date()} take-profit 50@109.00",  # 1/3 of 150
+                                                        f"{dates[4].date()} take-profit-2 38@126.00"]  # 1/4 of 150
+    # Nothing sold at +8%, but the green line no longer sells after it: the rest exit has taken over.
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, take_profit_fraction=0.0, take_profit2=0.25))
+    assert trades.iloc[0]["exits"] == f"{dates[4].date()} take-profit-2 38@126.00; {dates[5].date()} open at end 112@127.00"
+    assert trades.iloc[0]["took_profit"]
 
 
 def test_ema_exit_waits_for_consecutive_closes_below():

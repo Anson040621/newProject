@@ -111,7 +111,7 @@ The defaults are the current rule set ("version #26" = #25 with no more re-buys 
 | Entry | next day, buy-stop at the ATR flip level; filled when the price touches it, at the open if it gaps above (`--entry-buffer` to place it higher) |
 | Size | 15% of equity per trade (`--size`), at most 6 positions (`--max-positions`); highest SCTR first |
 | Exit before +8% | a) a close below the green ATR line (SELL label): everything at the next open; b) safety net: the price touches 2% below the previous close's green line (`--atr-stop-buffer`): everything at once, at the open if it gaps below |
-| Take profit | 1/3 at +8% (`--take-profit`), intraday |
+| Take profit | 1/3 at +8% (`--take-profit`), intraday; `--take-profit-fraction 0` sells nothing there (the exit after +8% still takes over), `--take-profit2 0.25 --take-profit2-fraction 0.25` also sells 1/4 of the original shares at +25% |
 | Exit after +8% | the rest at the next open after a close more than 3% below the 50-day SMA (`--sma-exit-buffer`), once price has closed above that level and from 21 trading days after the entry or re-entry (`--rest-exit-delay`, 0 = at once) (`--rest-exit ema20` for the old rule: 3 closes below the 20 EMA); nothing else sells the rest, so between the +8% sale and day 21 it is held (`--breakeven-exit` = #22: also sell after a close more than 3% below the entry price, `--breakeven-buffer`) |
 | Climax exit | once a trade has been up 40% at a close (`--climax-gain`, 0 = off = #23) and within the last 10 trading days closed 50%+ above its 100-day SMA (`--climax-stretch`, `--climax-ma`, `--climax-days`), an open at least 5% below the previous day's low (`--climax-gap`) or a big red candle, a close at least 6% below the day's open (`--climax-body`, 0 = #24), sells everything at the next open, with no re-entry (`--climax-reentry` to allow it) |
 | Re-entry | after any exit, before or after +8%, if the ATR flips back to BUY within 5 trading days of the exit, buy-stop at the flip level, at any SCTR rank (`--reentry-days`, 0 = off; `--no-reentry-after-tp` = #22: only after exits before +8%; `--reentry-top N` to require the top N); no more re-buys after 3 trades in a row (the setup buy and the re-buys after it) that made no more than +20% (`--reentry-max-losses`, 0 = off = #25; `--reentry-win`); a new setup buy starts the count again |
@@ -141,6 +141,17 @@ $427k (13.2% a year, worst drawdown -22.8%, 254 trades, 44% winners, profit fact
 -24%, profit factor 1.88). #17 (5% safety net): $352k (11.3%, -26%). #16 (20 EMA exit): $258k (8.4%, -22%); #13 (no break-even exit): $289k (9.5%, -26%).
 #14 (+2% entry, stop-only exit) returned 1.0% a year and #15 (#14 + 12% hard
 stop) -0.9%: the +2% entry skipped 7 of the 12 biggest winners.
+
+Candidate exit: #26 with `--take-profit-fraction 0 --take-profit2 0.25 --take-profit2-fraction 0.25` (nothing sold at +8%,
+where the 50-day exit takes over, and 1/4 sold at +25%): $1.14M (23.1% a year, worst drawdown -26.5%, Feb 2021 to
+Sep 2022, Sharpe 1.20, 319 trades); the middle winners (best close +15-60%) keep 40% of their best gain instead
+of 32%, the big winners (+60% or more) 63% instead of 54%, the other trades average -3.8% instead of -2.8%. With
+idle money in QQQ (`--park QQQ`, on average about half the account): $1.95M (28.8% a year, worst drawdown -41.0%,
+Nov 2021 to Jun 2022, Sharpe 1.07; 2022 -25.4%, 2023 +32.7%); #26 with `--park QQQ`: $1.84M (28.1%, -40.2%,
+Sharpe 1.10); one-off tests: in QQQ only while QQQ closed above its 200-day average the evening before (cash
+otherwise, switches free): $1.80M (28.0%, -36.6%, Sharpe 1.15), #26 the same way $1.62M (26.8%, -34.3%, 1.18);
+in SPY: $1.51M (26.0%, -37.5% in Feb-Mar 2020, Sharpe 1.06), above its 200-day only $1.49M (25.9%, -32.6%, 1.16);
+QQQ alone: $794k (19.3% a year, -35.1%).
 
 Alternative to revisit later: #26 with `--twin-days 20` (also buy setups outside the top
 10 that look like META's in Mar 2023 and TER's in Sep 2025, see `backtest/twins.py`; the

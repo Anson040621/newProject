@@ -116,7 +116,12 @@ def main(argv=None):
     parser.add_argument("--min-sctr", type=float, default=defaults.min_sctr)
     parser.add_argument("--take-profit", type=float, default=defaults.take_profit, help="e.g. 0.08 = +8%%")
     parser.add_argument("--take-profit-fraction", type=float, default=defaults.take_profit_fraction,
-                        help="share of the position sold at --take-profit (default 1/3)")
+                        help="share of the position sold at --take-profit (default 1/3; 0 = none, the rest exit still "
+                             "takes over there)")
+    parser.add_argument("--take-profit2", type=float, default=defaults.take_profit2,
+                        help="also sell part of the position when the price reaches this gain, e.g. 0.25 (default 0 = off)")
+    parser.add_argument("--take-profit2-fraction", type=float, default=defaults.take_profit2_fraction,
+                        help="share of the original position sold at --take-profit2 (default 0.25)")
     parser.add_argument("--ema-exit-days", type=int, default=defaults.ema_exit_days,
                         help="consecutive closes below the 20 EMA before selling the rest (default 3)")
     parser.add_argument("--no-squeeze", action="store_true",
@@ -241,7 +246,8 @@ def main(argv=None):
 
     rules = strategy.Rules(
         top_n=args.top, min_sctr=args.min_sctr, position_size=args.size, max_positions=args.max_positions,
-        take_profit=args.take_profit, take_profit_fraction=args.take_profit_fraction, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
+        take_profit=args.take_profit, take_profit_fraction=args.take_profit_fraction, take_profit2=args.take_profit2,
+        take_profit2_fraction=args.take_profit2_fraction, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
         emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
         extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
