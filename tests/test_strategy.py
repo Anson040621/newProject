@@ -597,6 +597,10 @@ def test_market_window_counts_distribution_days_and_the_average():
     volume = series([1, 2, 1, 2, 1, 1, 1, 0.5, 1])  # days 1 and 3 fall 0.2%+ on higher volume; day 7 on lower volume
     ok = market_window(close, volume, dd=2, dd_days=5)
     assert list(ok) == [True, True, True, False, False, False, True, True, True]  # 2 in the last 5 sessions: closed
+    # With a volume average: day 4 falls 0.3% on more volume than day 3 (2 > 1), but below the 3-day average (2.67).
+    close, volume = series([100, 100, 100, 100, 99.7, 100]), series([5, 5, 5, 1, 2, 2])
+    assert list(market_window(close, volume, dd=1, dd_days=5)) == [True] * 4 + [False] * 2
+    assert market_window(close, volume, dd=1, dd_days=5, dd_volume_ma=3).all()
     ok = market_window(series([100, 101, 102, 99, 103]), series([1] * 5), sma=3)
     assert list(ok) == [False, False, True, False, True]  # below the 3-day average on day 3
 

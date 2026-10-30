@@ -88,7 +88,8 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           SPY and QQQ both closed above their 200-day average that evening.
   Option --market-dd 4: no new buys while the S&P 500 has had 4 or more distribution days
           (a close 0.2%+ lower than the day before, on higher volume than the day before)
-          in the last 21 trading days (--market-dd-days). --market-sma 20: no new buys
+          in the last 21 trading days (--market-dd-days; --market-dd-volume-ma 50: the
+          volume must also be above its 50-day average). --market-sma 20: no new buys
           after an S&P 500 close below its 20-day average. --no-market-reentry: these
           market filters stop new setup buys only, not re-entries.
   Option --template: only buy setups in stocks that meet the uptrend template that evening:
@@ -190,6 +191,7 @@ class Rules:
     market_ma: int = 0  # market filter: no new buys unless SPY and QQQ close above their N-day average (0 = off)
     market_dd: int = 0  # no new buys while the S&P 500 had this many distribution days or more ... (0 = off)
     market_dd_days: int = 21  # ... in this many trading days
+    market_dd_volume_ma: int = 0  # ... a distribution day also needs volume above its N-day average (0 = off)
     market_sma: int = 0  # no new buys after an S&P 500 close below its N-day average (0 = off)
     market_reentry: bool = True  # the market filters stop re-entries too (False: new setup buys only)
     template: bool = False  # only buy setups in stocks that meet the uptrend template (signal column "template")

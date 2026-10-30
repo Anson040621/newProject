@@ -52,13 +52,18 @@ def load_index(symbol: str = "^GSPC", refresh: bool = False) -> pd.DataFrame:
     return pd.DataFrame({"close": data["Close"], "volume": data["Volume"]})
 
 
-def market_window(close: pd.Series, volume: pd.Series, dd: int = 0, dd_days: int = 21, sma: int = 0) -> pd.Series:
+def market_window(close: pd.Series, volume: pd.Series, dd: int = 0, dd_days: int = 21, sma: int = 0,
+                  dd_volume_ma: int = 0) -> pd.Series:
     """True on the evenings new buys are allowed by the index (Rules.market_dd / market_sma):
     fewer than `dd` distribution days (a close 0.2%+ below the day before, on higher volume than
-    the day before) in the last `dd_days` sessions, and a close at or above the `sma`-day average."""
+    the day before and, with `dd_volume_ma`, above the average volume of the last that many
+    sessions, today included) in the last `dd_days` sessions, and a close at or above the
+    `sma`-day average."""
     ok = pd.Series(True, index=close.index)
     if dd:
         distribution = (close.pct_change() <= -0.002) & (volume > volume.shift(1))
+        if dd_volume_ma:
+            distribution &= volume > volume.rolling(dd_volume_ma).mean()
         ok &= distribution.astype(int).rolling(dd_days, min_periods=1).sum() < dd
     if sma:
         ok &= close >= close.rolling(sma).mean()
@@ -275,6 +280,9 @@ def main(argv=None):
                              "higher volume than the day before) in the last --market-dd-days, e.g. 4 (default 0 = off)")
     parser.add_argument("--market-dd-days", type=int, default=defaults.market_dd_days,
                         help="with --market-dd: the window in trading days (default 21, about a month)")
+    parser.add_argument("--market-dd-volume-ma", type=int, default=defaults.market_dd_volume_ma,
+                        help="with --market-dd: a distribution day also needs volume above its N-day average, e.g. 50 "
+                             "(default 0 = off)")
     parser.add_argument("--market-sma", type=int, default=defaults.market_sma,
                         help="no new buys after an S&P 500 close below its N-day average, e.g. 20 (default 0 = off)")
     parser.add_argument("--market-reentry", action=argparse.BooleanOptionalAction, default=defaults.market_reentry,
@@ -310,7 +318,8 @@ def main(argv=None):
         climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
-        market_dd=args.market_dd, market_dd_days=args.market_dd_days, market_sma=args.market_sma,
+        market_dd=args.market_dd, market_dd_days=args.market_dd_days, market_dd_volume_ma=args.market_dd_volume_ma,
+        market_sma=args.market_sma,
         market_reentry=args.market_reentry, template=bool(args.template), template_reentry=args.template_reentry,
         profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
         late_entry_days=args.late_entry_days, twin_days=args.twin_days,
@@ -331,7 +340,8 @@ def main(argv=None):
             market &= market_ok(dates, args.market_ma)
         if args.market_dd or args.market_sma:
             spx = load_index("^GSPC")
-            window = market_window(spx["close"], spx["volume"], args.market_dd, args.market_dd_days, args.market_sma)
+            window = market_window(spx["close"], spx["volume"], args.market_dd, args.market_dd_days, args.market_sma,
+                                   args.market_dd_volume_ma)
             market &= window.reindex(dates).ffill().fillna(False).astype(bool)
     equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park, market=market, twins=twin_setups)
     spy = load_benchmark(args.start)
