@@ -23,6 +23,9 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
                line: sell everything at once (at the open if it gaps below).
             Option --stop-loss 0.05: also sell everything at once when the price touches
                5% below the entry price (at the open if it gaps below).
+               --stop-loss-reentry 0.02: for 5 trading days after such a sale, a buy-stop
+               also waits at the old entry price + 2% (on top of the usual re-entry; the
+               lower of the two levels fills first).
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
                       Option --take-profit-fraction 0: sell nothing there; the rest exit
                       below still takes over from +8%. Option --take-profit2 0.25
@@ -150,6 +153,7 @@ class Rules:
     entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
     stop_loss: float = 0.0  # before the take profit: sell everything at -X from entry, intraday (e.g. 0.05; 0 = off)
+    stop_loss_reentry: float = 0.0  # after a stop_loss exit: also re-buy at the old entry price + X within reentry_days (0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     late_entry_days: int = 0  # buy a top-10 stock whose valid entry came in the last N days while off the list (0 = off)
@@ -340,6 +344,7 @@ def run(
     pending_entries: list[tuple[str, float, str]] = []  # (ticker, sctr, kind), filled at the open
     touch_orders: list[tuple[str, float, str]] = []  # buy-stop orders at the ATR flip level, for today
     early_exits: dict[str, tuple[int, float, str]] = {}  # ticker -> (day number of an exit before +8%, sctr, how)
+    rebuy_levels: dict[str, float] = {}  # ticker -> buy-stop level after a stop-loss exit (stop_loss_reentry)
     setup_entries: dict[str, int] = {}  # ticker -> day number of the last full-setup entry
     loss_streak: dict[str, int] = {}  # ticker -> trades in a row since its last setup buy that did not win
     missed: dict[str, int] = {}  # ticker -> day number of its last valid entry while off the list (--late-entry-days)
@@ -393,8 +398,11 @@ def run(
         won = pos.proceeds / pos.cost_basis - 1 > rules.reentry_win
         loss_streak[pos.ticker] = 0 if won else loss_streak.get(pos.ticker, 0) + 1
         worn_out = rules.reentry_max_losses and loss_streak[pos.ticker] >= rules.reentry_max_losses
+        rebuy_levels.pop(pos.ticker, None)
         if rules.reentry_days and (not pos.tp_taken or rules.reentry_after_tp) and not climax and not worn_out:
             early_exits[pos.ticker] = (day_number, pos.sctr, pos.fills[-1][1] if pos.fills else "")
+            if rules.stop_loss_reentry and pos.fills and pos.fills[-1][1] == "stop-loss":
+                rebuy_levels[pos.ticker] = pos.entry_price * (1 + rules.stop_loss_reentry)
 
     def buy(ticker, price, day, sctr, kind, intraday) -> bool:
         nonlocal cash
@@ -452,6 +460,8 @@ def run(
         #     high reaches yesterday's trail line, at the open if it gaps above.
         for ticker, sctr, kind in touch_orders:
             level = signals[ticker].at[day, "flip_level"] * (1 + rules.entry_buffer)
+            if kind == "reentry" and ticker in rebuy_levels:
+                level = np.nanmin([level, rebuy_levels[ticker]])  # after a stop loss: the lower buy-stop fills first
             high, open_ = px(ticker, day, "high"), px(ticker, day, "open")
             if pd.isna(level) or high is None or high < level:
                 continue
@@ -702,12 +712,15 @@ def run(
             if rules.entry_on_touch:
                 if day_number + 1 - exit_day > rules.reentry_days:
                     del early_exits[ticker]
-                elif listed and sig.at[day, "trend"] != 1:
+                elif listed and (sig.at[day, "trend"] != 1 or ticker in rebuy_levels):
                     candidates.insert(0, (ticker, sctr, "reentry"))
             elif day_number - exit_day > rules.reentry_days:
                 del early_exits[ticker]
             elif listed and bool(sig.at[day, "atr_buy"]):
                 candidates.insert(0, (ticker, sctr, "reentry"))
+
+        for ticker in set(rebuy_levels) - set(early_exits):
+            del rebuy_levels[ticker]  # the re-entry window has closed (or the stock was bought back)
 
         # --late-entry-days: valid entries made while off the list, bought once the stock is on it.
         if rules.late_entry_days:

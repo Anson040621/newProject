@@ -82,7 +82,7 @@ def test_default_rules_are_version_26():
     assert not rules.twin_days
     assert (rules.take_profit_fraction, rules.take_profit2) == (1 / 3, 0.0)
     assert not rules.market_dd and not rules.market_sma and not rules.template and rules.market_reentry
-    assert not rules.stop_loss
+    assert not rules.stop_loss and not rules.stop_loss_reentry
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -181,6 +181,28 @@ def test_stop_loss_before_the_take_profit_only():
     dates, prices, sigs, top = make_world([100, 100, 100, 121, 94, 94], entry_day=1)
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, stop_loss=0.05, take_profit=0.20))
     assert trades.iloc[0]["exits"] == f"{dates[3].date()} take-profit 50@121.00; {dates[5].date()} open at end 100@94.00"
+
+
+def test_rebuy_at_the_old_entry_plus_2_percent_after_a_stop_loss():
+    def world(closes):
+        dates, prices, sigs, top = make_world(closes, entry_day=-1)
+        sig = sigs["AAA"]
+        sig["setup"] = [i == 1 for i in range(len(closes))]  # squeeze + red bar on day 1
+        sig["trend"] = [-1, -1] + [1] * (len(closes) - 2)  # stays up: no ATR re-entry
+        sig["flip_level"] = [np.nan, np.nan, 100.0] + [np.nan] * (len(closes) - 3)
+        return dates, prices, sigs, top
+    rules = dict(cost=0.0, entry_on_touch=True, stop_loss=0.05, reentry_days=5)
+    # Bought at 100 on day 2, stopped at 95 on day 3; day 5's high (102.01) reaches 102.
+    dates, prices, sigs, top = world([100, 100, 100, 95.5, 96, 101, 103, 103])
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(**rules, stop_loss_reentry=0.02))
+    assert list(trades["entry_date"]) == [dates[2], dates[5]] and trades.iloc[1]["entry_price"] == 102.0
+    assert trades.iloc[1]["entry_kind"] == "reentry"
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(**rules))
+    assert len(trades) == 1
+    # Only within 5 trading days of the stop: day 9 is too late.
+    dates, prices, sigs, top = world([100, 100, 100, 95.5, 96, 96, 96, 96, 96, 103])
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(**rules, stop_loss_reentry=0.02))
+    assert len(trades) == 1
 
 
 def test_50ma_violation_sells_the_rest_below_the_break_day_low():

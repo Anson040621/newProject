@@ -204,6 +204,9 @@ def main(argv=None):
     parser.add_argument("--stop-loss", type=float, default=defaults.stop_loss,
                         help="before --take-profit: sell everything the moment the price touches this loss from the "
                              "entry, e.g. 0.05 = -5%% (default 0 = off)")
+    parser.add_argument("--stop-loss-reentry", type=float, default=defaults.stop_loss_reentry,
+                        help="for --reentry-days after a --stop-loss sale, also re-buy when the price gets back to the "
+                             "old entry price plus this, e.g. 0.02 = +2%% (default 0 = off)")
     parser.add_argument("--reentry-days", type=int, default=defaults.reentry_days,
                         help="re-buy if the ATR flips back to BUY within N days of an early exit (default 5, 0 = off)")
     parser.add_argument("--entry-check", choices=["prev", "live", "either"], default=defaults.entry_check,
@@ -312,7 +315,7 @@ def main(argv=None):
         take_profit=args.take_profit, take_profit_fraction=args.take_profit_fraction, take_profit2=args.take_profit2,
         take_profit2_fraction=args.take_profit2_fraction, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
-        emergency_stop=args.emergency_stop, stop_loss=args.stop_loss, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
+        emergency_stop=args.emergency_stop, stop_loss=args.stop_loss, stop_loss_reentry=args.stop_loss_reentry, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
         extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
         red_line_stop=args.red_line_stop, climax_gain=args.climax_gain, climax_stretch=args.climax_stretch,
         climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
