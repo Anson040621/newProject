@@ -191,7 +191,7 @@ def load_prices(tickers=None, start=None, end=None, prices_dir: Path = PRICES_DI
 
 
 def load_ohlc(tickers, prices_dir: Path = PRICES_DIR) -> dict[str, pd.DataFrame]:
-    """Split-adjusted open/high/low/close per ticker (as on a TradingView chart).
+    """Split-adjusted open/high/low/close per ticker (as on a TradingView chart), plus the volume.
 
     A missing open (e.g. a session filled from Yahoo's quote) is set to the close.
     """
@@ -201,8 +201,8 @@ def load_ohlc(tickers, prices_dir: Path = PRICES_DIR) -> dict[str, pd.DataFrame]
         if not path.exists():
             continue
         frame = _read_price_file(path)
-        ohlc = frame.reindex(columns=["Open", "High", "Low", "Close"]).astype(float)
-        ohlc.columns = ["open", "high", "low", "close"]
+        ohlc = frame.reindex(columns=["Open", "High", "Low", "Close", "Volume"]).astype(float)
+        ohlc.columns = ["open", "high", "low", "close", "volume"]
         ohlc = ohlc.dropna(subset=["close"])
         ohlc["open"] = ohlc["open"].fillna(ohlc["close"])
         ohlc["high"] = ohlc["high"].fillna(ohlc[["open", "close"]].max(axis=1))

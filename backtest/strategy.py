@@ -78,6 +78,15 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
           --climax-drop-atr 2.5 (a fall of 2.5+ times the stock's average daily range).
   Option --market-ma 200: market filter - no new buys (setups or re-entries) unless
           SPY and QQQ both closed above their 200-day average that evening.
+  Option --market-dd 4: no new buys while the S&P 500 has had 4 or more distribution days
+          (a close 0.2%+ lower than the day before, on higher volume than the day before)
+          in the last 21 trading days (--market-dd-days). --market-sma 20: no new buys
+          after an S&P 500 close below its 20-day average. --no-market-reentry: these
+          market filters stop new setup buys only, not re-entries.
+  Option --template: only buy setups in stocks that meet the uptrend template that evening:
+          the close above the 50-day SMA, the 50-day above the 200-day, more volume on up
+          days than on down days over the last 20 sessions, and within 25% of the 52-week
+          high (--template-reentry: re-entries too).
   Option --red-line-stop 0.03: while a position has no green line yet (the buy day
           closed back below the flip line), sell everything the moment the price touches
           3% below the previous close's red line (the down-trend line it was bought at),
@@ -168,6 +177,12 @@ class Rules:
     climax_body: float = 0.06  # ... or a close this far below the day's open (0 = off)
     climax_drop_atr: float = 0.0  # ... or a fall from the previous close of N x yesterday's ATR(14) (0 = off)
     market_ma: int = 0  # market filter: no new buys unless SPY and QQQ close above their N-day average (0 = off)
+    market_dd: int = 0  # no new buys while the S&P 500 had this many distribution days or more ... (0 = off)
+    market_dd_days: int = 21  # ... in this many trading days
+    market_sma: int = 0  # no new buys after an S&P 500 close below its N-day average (0 = off)
+    market_reentry: bool = True  # the market filters stop re-entries too (False: new setup buys only)
+    template: bool = False  # only buy setups in stocks that meet the uptrend template (signal column "template")
+    template_reentry: bool = False  # ... and re-entries too
     rest_exit_delay: int = 21  # ... the rest exit only from this many trading days after the entry (0 = at once)
     sma_exit_buffer: float = 0.03  # with rest_exit="sma50": the close must be this far below the 50 SMA
     entry_check: str = "prev"  # when the squeeze / red bar must show: "prev" close, "live" as the price
@@ -228,6 +243,8 @@ def run(
              Moves during the day happen at the day's ETF open-to-close average return
              (we only have daily data), i.e. the idle balance earns overnight and
              open-to-close returns.
+    market:  for rules.market_ma / market_dd / market_sma, True on the evenings new buys are
+             allowed (all active market filters combined, see run_backtest.market_window).
     Returns the daily equity curve and the trade log.
     """
     listed = 10**9 if rules.extra_slots else rules.top_n  # extra_slots: every stock above min_sctr
@@ -240,8 +257,11 @@ def run(
             raise ValueError("list_memory_min_sctr needs every stock's SCTR in the top table (all ranks)")
         all_sctr = top.pivot_table(index="date", columns="ticker", values="sctr")
     top = top[(top["rank"] <= max(listed, rules.reentry_top)) & (top["sctr"] > rules.min_sctr)]
-    if rules.market_ma and market is None:
-        raise ValueError("market_ma needs the market series (True = SPY and QQQ above their average)")
+    market_filter = bool(rules.market_ma or rules.market_dd or rules.market_sma)
+    if market_filter and market is None:
+        raise ValueError("market_ma / market_dd / market_sma need the market series (True = new buys allowed)")
+    if rules.template and any("template" not in s.columns for s in signals.values()):
+        raise ValueError("template needs a 'template' signal column (see run_backtest.prepare)")
     if (rules.min_vol or rules.max_vol) and "vol" not in top.columns:
         raise ValueError("min_vol / max_vol need a 'vol' column in the top table (see run_backtest.prepare)")
     if rules.min_vol:
@@ -586,6 +606,8 @@ def run(
                 sig = signals.get(row.ticker)
                 if sig is None or row.ticker in positions:
                     continue
+                if rules.template and not bool(sig.at[day, "template"]):
+                    continue  # not in an uptrend template tonight
                 if getattr(row, "recent", False) and rules.list_memory_above_ma:
                     ma, close = sig.at[day, f"sma{rules.list_memory_above_ma}"], px(row.ticker, day, "close")
                     if pd.isna(ma) or close is None or close <= ma:
@@ -621,6 +643,8 @@ def run(
                 continue
             # With reentry_top: no order tonight unless the stock is in the top N (the window keeps running).
             listed = not rules.reentry_top or ticker in reentry_ok.get(day, ())
+            if rules.template and rules.template_reentry and not bool(sig.at[day, "template"]):
+                listed = False  # the same for the uptrend template
             # Shaken out: the intraday stop sold us, but the close is still in an
             # up-trend (it never flipped to SELL) -> buy back at the next open.
             if (rules.rebuy_shakeouts and listed and how == "atr-stop" and sig.at[day, "trend"] == 1
@@ -647,10 +671,13 @@ def run(
                 for row in today.itertuples():
                     j = missed.get(row.ticker)
                     if (j is not None and day_number - j <= rules.late_entry_days and row.ticker not in positions
-                            and signals[row.ticker].at[day, "trend"] == 1):
+                            and signals[row.ticker].at[day, "trend"] == 1
+                            and (not rules.template or bool(signals[row.ticker].at[day, "template"]))):
                         close_setups.append((row.ticker, row.sctr, "setup-late"))
-        if rules.market_ma and not bool(market.get(day, False)):
-            candidates, close_setups = [], []  # market filter: SPY or QQQ below its average, no new buys
+        if market_filter and not bool(market.get(day, False)):
+            # Market filter: no new buys tonight (with market_reentry=False, re-entries still go ahead).
+            candidates = [] if rules.market_reentry else [c for c in candidates if c[2] == "reentry"]
+            close_setups = []
         seen = set()
         for order in candidates:
             if order[0] not in seen:

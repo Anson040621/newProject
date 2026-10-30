@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from backtest import signals, strategy, twins
+from backtest.run_backtest import market_window
 
 
 def series(values, start="2024-01-01"):
@@ -80,6 +81,7 @@ def test_default_rules_are_version_26():
     assert (rules.reentry_max_losses, rules.reentry_win) == (3, 0.20) and not rules.profit_floor and not rules.list_memory and not rules.late_entry_days
     assert not rules.twin_days
     assert (rules.take_profit_fraction, rules.take_profit2) == (1 / 3, 0.0)
+    assert not rules.market_dd and not rules.market_sma and not rules.template and rules.market_reentry
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -527,6 +529,55 @@ def test_market_filter_blocks_new_buys():
     assert len(trades) == 1
     with pytest.raises(ValueError):
         strategy.run(dates, prices, sigs, top, basic_rules(market_ma=200))
+
+
+def test_trend_template_needs_every_condition():
+    close = series(np.linspace(50, 110, 300))  # a steady climb: every condition holds at the end
+    high, volume = close * 1.01, close * 0 + 1e6
+    assert signals.trend_template(high, close, volume).iloc[-1]
+    spike = high.copy()
+    spike.iloc[-100] = 300.0  # a 52-week high of 300: the close of 110 is more than 25% below it
+    assert not signals.trend_template(spike, close, volume).iloc[-1]
+    dip = close.copy()
+    dip.iloc[-1] = 93.5  # 15% down on the day: below the 50-day average (about 104)
+    assert not signals.trend_template(dip * 1.01, dip, volume).iloc[-1]
+    choppy = close.copy()
+    choppy.iloc[-20::2] -= 2.0  # every other day of the last 20 closes lower ...
+    heavy = volume.copy()
+    heavy.iloc[-20::2] = 3e6  # ... on three times the volume
+    assert not signals.trend_template(choppy * 1.01, choppy, heavy).iloc[-1]
+    below = series(np.r_[[100.0] * 200, np.linspace(100, 60, 60), np.linspace(60, 80, 40)])  # 50-day under the 200-day
+    assert not signals.trend_template(below * 1.01, below, below * 0 + 1e6).iloc[-1]
+
+
+def test_market_window_counts_distribution_days_and_the_average():
+    close = series([100, 99.7, 100, 99.5, 100, 100, 100, 99.0, 100])
+    volume = series([1, 2, 1, 2, 1, 1, 1, 0.5, 1])  # days 1 and 3 fall 0.2%+ on higher volume; day 7 on lower volume
+    ok = market_window(close, volume, dd=2, dd_days=5)
+    assert list(ok) == [True, True, True, False, False, False, True, True, True]  # 2 in the last 5 sessions: closed
+    ok = market_window(series([100, 101, 102, 99, 103]), series([1] * 5), sma=3)
+    assert list(ok) == [False, False, True, False, True]  # below the 3-day average on day 3
+
+
+def test_template_and_market_filters_for_setups_and_reentries():
+    closes = [100, 100, 100, 109, 112, 111, 105, 104, 106, 108, 110, 111]
+    dates, prices, sigs, top = make_world(closes, entry_day=1, ema=[101, 101, 101] + [110] * 9)
+    sigs["AAA"]["atr_buy"] = [False] * 9 + [True] + [False] * 2  # the re-entry signal on day 9
+    run = lambda market=None, **kw: strategy.run(dates, prices, sigs, top, basic_rules(
+        cost=0.0, reentry_days=5, reentry_after_tp=True, **kw), market=market)[1]
+    assert list(run()["entry_date"]) == [dates[2], dates[10]]
+    sigs["AAA"]["template"] = True
+    sigs["AAA"].loc[dates[1], "template"] = False  # the setup evening fails the template
+    assert run(template=True).empty
+    sigs["AAA"]["template"] = True
+    sigs["AAA"].loc[dates[9], "template"] = False  # the re-entry evening fails it
+    assert len(run(template=True)) == 2 and len(run(template=True, template_reentry=True)) == 1
+    closed = pd.Series(True, index=dates)
+    closed[dates[9]] = False  # the market filter is on that evening
+    assert len(run(market=closed, market_dd=4)) == 1
+    assert len(run(market=closed, market_dd=4, market_reentry=False)) == 2  # re-entries still allowed
+    with pytest.raises(ValueError):
+        run(market_sma=20)  # needs the market series
 
 
 def test_volatility_limit_needs_the_vol_column():

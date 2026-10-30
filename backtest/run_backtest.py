@@ -37,12 +37,40 @@ def load_etf(symbol: str, refresh: bool = False) -> pd.DataFrame:
     return pd.DataFrame({"open": data["Open"] * factor, "close": data["Adj Close"]})
 
 
+def load_index(symbol: str = "^GSPC", refresh: bool = False) -> pd.DataFrame:
+    """Daily close and volume of a market index (default: the S&P 500), downloaded once."""
+    path = DATA_DIR / "benchmark" / f"{symbol.lstrip('^')}.csv"
+    if refresh or not path.exists():
+        import yfinance as yf
+
+        data = yf.download(symbol, start="2010-01-01", auto_adjust=False, progress=False)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data[["Close", "Volume"]].to_csv(path)
+    data = pd.read_csv(path, index_col=0, parse_dates=True)
+    return pd.DataFrame({"close": data["Close"], "volume": data["Volume"]})
+
+
+def market_window(close: pd.Series, volume: pd.Series, dd: int = 0, dd_days: int = 21, sma: int = 0) -> pd.Series:
+    """True on the evenings new buys are allowed by the index (Rules.market_dd / market_sma):
+    fewer than `dd` distribution days (a close 0.2%+ below the day before, on higher volume than
+    the day before) in the last `dd_days` sessions, and a close at or above the `sma`-day average."""
+    ok = pd.Series(True, index=close.index)
+    if dd:
+        distribution = (close.pct_change() <= -0.002) & (volume > volume.shift(1))
+        ok &= distribution.astype(int).rolling(dd_days, min_periods=1).sum() < dd
+    if sma:
+        ok &= close >= close.rolling(sma).mean()
+    return ok
+
+
 def load_benchmark(start, symbol: str = "SPY") -> pd.Series:
     """Total-return closes of the benchmark ETF from `start`."""
     return load_etf(symbol)["close"].loc[start:]
 
 
-def prepare(start, end, top_n: int = 10, require_squeeze: bool = True, find_twins: bool = False):
+def prepare(start, end, top_n: int = 10, require_squeeze: bool = True, find_twins: bool = False, template: bool = False):
     """Daily top N, the trading calendar, OHLC prices and signals for every ticker that ever made the top N.
 
     With find_twins, also the twin setups (backtest/twins.py) of every stock in the universe, with
@@ -65,11 +93,14 @@ def prepare(start, end, top_n: int = 10, require_squeeze: bool = True, find_twin
     for ticker, frame in ohlc.items():
         full[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze,
                                               open_=frame["open"])
+        if template:
+            full[ticker]["template"] = signals.trend_template(frame["high"], frame["close"], frame["volume"])
         sigs[ticker] = full[ticker].reindex(dates)
         prices[ticker] = frame.reindex(dates)
     for frame in sigs.values():
-        for col in ("setup", "entry_setup", "setup_dim_green", "atr_buy", "atr_exit"):
-            frame[col] = frame[col].fillna(False).astype(bool)
+        for col in ("setup", "entry_setup", "setup_dim_green", "atr_buy", "atr_exit", "template"):
+            if col in frame.columns:
+                frame[col] = frame[col].fillna(False).astype(bool)
 
     twin_setups = None
     if find_twins:
@@ -231,6 +262,21 @@ def main(argv=None):
                         help="... or a fall from the previous close of N x the 14-day ATR, e.g. 2.5 (0 = off)")
     parser.add_argument("--market-ma", type=int, default=defaults.market_ma,
                         help="no new buys unless SPY and QQQ close above their N-day average, e.g. 200 (0 = off)")
+    parser.add_argument("--market-dd", type=int, default=defaults.market_dd,
+                        help="no new buys while the S&P 500 had N or more distribution days (a close 0.2%%+ lower on "
+                             "higher volume than the day before) in the last --market-dd-days, e.g. 4 (default 0 = off)")
+    parser.add_argument("--market-dd-days", type=int, default=defaults.market_dd_days,
+                        help="with --market-dd: the window in trading days (default 21, about a month)")
+    parser.add_argument("--market-sma", type=int, default=defaults.market_sma,
+                        help="no new buys after an S&P 500 close below its N-day average, e.g. 20 (default 0 = off)")
+    parser.add_argument("--market-reentry", action=argparse.BooleanOptionalAction, default=defaults.market_reentry,
+                        help="the market filters stop re-entries too (default); --no-market-reentry: new setup buys only")
+    parser.add_argument("--template", action=argparse.BooleanOptionalAction, default=defaults.template,
+                        help="only buy setups in stocks that meet the uptrend template that evening: above the 50-day "
+                             "SMA, 50-day above the 200-day, more volume on up days than down days over 20 sessions, "
+                             "within 25%% of the 52-week high (default off)")
+    parser.add_argument("--template-reentry", action=argparse.BooleanOptionalAction, default=defaults.template_reentry,
+                        help="with --template: re-entries must meet it too (default off)")
     parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,
                         help="no green line yet: sell this far below the previous close's red line, e.g. 0.03 (0 = off)")
     parser.add_argument("--reentry-after-tp", action=argparse.BooleanOptionalAction, default=defaults.reentry_after_tp,
@@ -255,6 +301,8 @@ def main(argv=None):
         climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
+        market_dd=args.market_dd, market_dd_days=args.market_dd_days, market_sma=args.market_sma,
+        market_reentry=args.market_reentry, template=args.template, template_reentry=args.template_reentry,
         profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
         late_entry_days=args.late_entry_days, twin_days=args.twin_days,
         list_memory_min_sctr=args.list_memory_min_sctr, list_memory_min_run=args.list_memory_min_run,
@@ -264,9 +312,18 @@ def main(argv=None):
         rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     ranks = 10**4 if args.extra_slots or args.list_memory_min_sctr else max(args.top, args.reentry_top)
-    dates, prices, sigs, top, twin_setups = prepare(args.start, args.end, ranks, not args.no_squeeze, bool(args.twin_days))
+    dates, prices, sigs, top, twin_setups = prepare(args.start, args.end, ranks, not args.no_squeeze, bool(args.twin_days),
+                                                    args.template)
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
-    market = market_ok(dates, args.market_ma) if args.market_ma else None
+    market = None
+    if args.market_ma or args.market_dd or args.market_sma:
+        market = pd.Series(True, index=dates)
+        if args.market_ma:
+            market &= market_ok(dates, args.market_ma)
+        if args.market_dd or args.market_sma:
+            spx = load_index("^GSPC")
+            window = market_window(spx["close"], spx["volume"], args.market_dd, args.market_dd_days, args.market_sma)
+            market &= window.reindex(dates).ffill().fillna(False).astype(bool)
     equity, trades = strategy.run(dates, prices, sigs, top, rules, park=park, market=market, twins=twin_setups)
     spy = load_benchmark(args.start)
 
