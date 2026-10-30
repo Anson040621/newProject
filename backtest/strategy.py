@@ -47,7 +47,8 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
                       trades below that day's low, sell the rest there (at the open if
                       it gaps below). A close back above the 50-day cancels it; with
                       several break days in a row the highest low counts. No cushion,
-                      no 21-day wait.
+                      no 21-day wait. --violation-armed: only once the stock has closed
+                      above its 50-day since the entry.
   Re-entry after any exit (before or after +8%), if the ATR trail flips back to BUY
           within 5 trading days of the exit: buy-stop at the flip level (no other
           conditions; --reentry-top N: only while the stock is in the top N).
@@ -181,6 +182,7 @@ class Rules:
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
     rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer), "ema20" (N closes below)
     #                           or "violation" (50MA violation: a later day trades below the low of a close below the 50 SMA)
+    violation_armed: bool = False  # rest_exit="violation": only once the stock has closed above the 50 SMA since the entry
     frozen_line: bool = False  # no-line entries: the green line the buy day would have had is a fixed stop
     red_line_stop: float = 0.0  # no-line positions: sell this far below the previous close's red line (0 = off)
     climax_gain: float = 0.40  # climax exit once a trade has been up this much at a close (0 = off) ...
@@ -231,6 +233,7 @@ class Position:
     stretch_day: int = -10**9  # last trading day it closed far above its 50-day SMA (climax exit)
     stop_line: float = float("nan")  # green line the intraday stop is based on
     break_low: float = float("nan")  # rest_exit="violation": low of the last close below the 50 SMA (NaN = none)
+    above_sma50: bool = False  # has closed above the 50 SMA since entry (violation_armed)
     reentry: bool = False
     kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
     extra: bool = False  # bought from outside the top N (extra_slots), or a re-entry of such a trade
@@ -611,7 +614,10 @@ def run(
                 rest_line, closes_needed = sig.at[day, "ema20"], rules.ema_exit_days
             pos.closes_below_ema = pos.closes_below_ema + 1 if close < rest_line else 0
             sma50 = sig.at[day, "sma50"]
-            if rules.rest_exit == "violation" and pos.tp_taken and pd.notna(sma50):
+            if pd.notna(sma50) and close > sma50:
+                pos.above_sma50 = True
+            if (rules.rest_exit == "violation" and pos.tp_taken and pd.notna(sma50)
+                    and (pos.above_sma50 or not rules.violation_armed)):
                 # A close below the 50 SMA marks a break day (several in a row: the highest low counts);
                 # a close back above it cancels.
                 if close < sma50:

@@ -182,6 +182,9 @@ def main(argv=None):
                         help="after +8%%: sma50 = close more than --sma-exit-buffer below the 50 SMA (default); "
                              "ema20 = --ema-exit-days closes in a row below the 20 EMA; violation = 50MA violation: "
                              "the moment the price trades below the low of the last close below the 50 SMA")
+    parser.add_argument("--violation-armed", action=argparse.BooleanOptionalAction, default=defaults.violation_armed,
+                        help="with --rest-exit violation: only once the stock has closed above its 50 SMA since the "
+                             "entry (default off)")
     parser.add_argument("--frozen-line", action=argparse.BooleanOptionalAction, default=defaults.frozen_line,
                         help="no-line entries: use the green line the buy day would have had as a fixed stop "
                              "until the trend turns up (default off)")
@@ -330,7 +333,7 @@ def main(argv=None):
         list_memory_gap=args.list_memory_gap, list_memory_above_ma=args.list_memory_above_ma,
         atr_stop_buffer=args.atr_stop_buffer, rebuy_shakeouts=args.rebuy_shakeouts,
         close_exit=args.close_exit, breakeven_exit=args.breakeven_exit,
-        rest_exit=args.rest_exit, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
+        rest_exit=args.rest_exit, violation_armed=args.violation_armed, rest_exit_delay=args.rest_exit_delay, frozen_line=args.frozen_line, entry_check=args.entry_check, breakeven_buffer=args.breakeven_buffer, close_entry=args.close_entry, dim_green_days=args.dim_green_days, failed_breakout_exit=args.failed_breakout_exit, sma_exit_buffer=args.sma_exit_buffer, sticky_stop=args.sticky_stop, entry_buffer=args.entry_buffer, park_cost=args.park_cost,
     )
     ranks = 10**4 if args.extra_slots or args.list_memory_min_sctr else max(args.top, args.reentry_top)
     dates, prices, sigs, top, twin_setups = prepare(args.start, args.end, ranks, not args.no_squeeze, bool(args.twin_days),

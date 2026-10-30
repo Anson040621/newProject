@@ -82,7 +82,7 @@ def test_default_rules_are_version_26():
     assert not rules.twin_days
     assert (rules.take_profit_fraction, rules.take_profit2) == (1 / 3, 0.0)
     assert not rules.market_dd and not rules.market_sma and not rules.template and rules.market_reentry
-    assert not rules.stop_loss and not rules.stop_loss_reentry
+    assert not rules.stop_loss and not rules.stop_loss_reentry and not rules.violation_armed
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -218,6 +218,19 @@ def test_50ma_violation_sells_the_rest_below_the_break_day_low():
     prices["AAA"].loc[dates[8], ["open", "low"]] = [105.5, 104.5]  # no gap: sold at the break day's low
     _, trades = strategy.run(dates, prices, sigs, top, rules)
     assert trades.iloc[0]["exits"].endswith(f"{dates[8].date()} 50ma-violation 100@104.94")
+
+
+def test_50ma_violation_can_wait_for_a_close_above_the_50_day():
+    #        signal  entry  +20% (below the 50-day)  above  break  gap below
+    closes = [100, 100, 100, 121, 118, 126, 120, 117]
+    dates, prices, sigs, top = make_world(closes, entry_day=1)
+    sigs["AAA"]["sma50"] = 125.0
+    rules = dict(cost=0.0, take_profit=0.20, rest_exit="violation")
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(**rules))
+    assert trades.iloc[0]["exits"].endswith(f"{dates[4].date()} 50ma-violation 100@118.00")  # day 3 was a break day
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(**rules, violation_armed=True))
+    # Days 3-4 don't count until day 5 closes above the 50-day; day 6 is the break day (low 118.80).
+    assert trades.iloc[0]["exits"].endswith(f"{dates[7].date()} 50ma-violation 100@117.00")
 
 
 def test_ema_exit_waits_for_consecutive_closes_below():
