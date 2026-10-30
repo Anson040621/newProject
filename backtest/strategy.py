@@ -21,6 +21,8 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
                everything at the next open;
             b) safety net: the price touches 2% below the previous close's green
                line: sell everything at once (at the open if it gaps below).
+            Option --stop-loss 0.05: also sell everything at once when the price touches
+               5% below the entry price (at the open if it gaps below).
           at +8%:     sell 1/3 at the +8% price (or at the open if it gaps above).
                       Option --take-profit-fraction 0: sell nothing there; the rest exit
                       below still takes over from +8%. Option --take-profit2 0.25
@@ -37,6 +39,12 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
                       Option --profit-floor 0.10: once the trade has been up 20% at a
                       close (--profit-floor-after), also sell the rest at the next open
                       after a close below +10%.
+                      Option --rest-exit violation (50MA violation, instead): a close
+                      below the 50-day SMA marks a break day; the moment a later day
+                      trades below that day's low, sell the rest there (at the open if
+                      it gaps below). A close back above the 50-day cancels it; with
+                      several break days in a row the highest low counts. No cushion,
+                      no 21-day wait.
   Re-entry after any exit (before or after +8%), if the ATR trail flips back to BUY
           within 5 trading days of the exit: buy-stop at the flip level (no other
           conditions; --reentry-top N: only while the stock is in the top N).
@@ -86,7 +94,8 @@ exit; #22 = #21 with a 75% volatility limit on the stocks):
   Option --template: only buy setups in stocks that meet the uptrend template that evening:
           the close above the 50-day SMA, the 50-day above the 200-day, more volume on up
           days than on down days over the last 20 sessions, and within 25% of the 52-week
-          high (--template-reentry: re-entries too).
+          high (--template-reentry: re-entries too). --template trend: only the 50-day
+          above the 200-day and within 25% of the 52-week high.
   Option --red-line-stop 0.03: while a position has no green line yet (the buy day
           closed back below the flip line), sell everything the moment the price touches
           3% below the previous close's red line (the down-trend line it was bought at),
@@ -139,6 +148,7 @@ class Rules:
     atr_exit_on_touch: bool = True  # before +8%: sell the moment price touches the ATR stop (see buffer)
     entry_on_touch: bool = True  # buy intraday when price touches the ATR flip level
     emergency_stop: float = 0.0  # hard stop: sell everything at -X from entry, any time (e.g. 0.12; 0 = off)
+    stop_loss: float = 0.0  # before the take profit: sell everything at -X from entry, intraday (e.g. 0.05; 0 = off)
     reentry_days: int = 5  # re-buy if the ATR flips back to BUY within N days of an early exit (0 = off)
     reentry_top: int = 0  # ... only while the stock is in the daily top N at the signal close (0 = any rank)
     late_entry_days: int = 0  # buy a top-10 stock whose valid entry came in the last N days while off the list (0 = off)
@@ -164,7 +174,8 @@ class Rules:
     profit_floor: float = 0.0  # after +8%: sell the rest after a close below this gain (0.10 = +10%; 0 = off) ...
     profit_floor_after: float = 0.20  # ... once the trade has been up this much at a close
     failed_breakout_exit: bool = False  # entry day closes back below the flip level -> sell at the next open
-    rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer) or "ema20" (N closes below)
+    rest_exit: str = "sma50"  # after +8%: "sma50" (close below the 50 SMA minus buffer), "ema20" (N closes below)
+    #                           or "violation" (50MA violation: a later day trades below the low of a close below the 50 SMA)
     frozen_line: bool = False  # no-line entries: the green line the buy day would have had is a fixed stop
     red_line_stop: float = 0.0  # no-line positions: sell this far below the previous close's red line (0 = off)
     climax_gain: float = 0.40  # climax exit once a trade has been up this much at a close (0 = off) ...
@@ -213,6 +224,7 @@ class Position:
     best_close: float = 0.0  # highest close since entry (climax exit)
     stretch_day: int = -10**9  # last trading day it closed far above its 50-day SMA (climax exit)
     stop_line: float = float("nan")  # green line the intraday stop is based on
+    break_low: float = float("nan")  # rest_exit="violation": low of the last close below the 50 SMA (NaN = none)
     reentry: bool = False
     kind: str = "setup"  # how the entry came about: "setup", "reentry" or "dim-green"
     extra: bool = False  # bought from outside the top N (extra_slots), or a re-entry of such a trade
@@ -466,24 +478,38 @@ def run(
                 sell(pos, pos.shares, fill, day, "emergency-stop")
                 close_out(pos, day)
 
-        # 2a. Intraday ATR stop: before +8%, sell everything the moment the price touches
-        #     the stop (buffer below yesterday's green line), at the open if it gaps below.
-        if rules.atr_exit_on_touch:
+        # 2a. Intraday stops before +8%: the ATR stop (buffer below yesterday's green line) and
+        #     the stop loss (stop_loss below the entry). Everything is sold the moment the price
+        #     touches the higher of the two, at the open if it gaps below.
+        if rules.atr_exit_on_touch or rules.stop_loss:
             for pos in list(positions.values()):
-                line = signals[pos.ticker].at[day, "atr_stop"]
-                frozen = pd.isna(line) and pd.notna(pos.frozen_line)
-                if frozen:
-                    line = pos.frozen_line  # no green line yet: the one the buy day would have had
-                if not rules.sticky_stop:
-                    pos.stop_line = line
-                elif pd.notna(line):
-                    pos.stop_line = line if pd.isna(pos.stop_line) else max(pos.stop_line, line)
-                stop = pos.stop_line * (1 - rules.atr_stop_buffer)
+                stop, reason = float("nan"), "atr-stop"
+                if rules.atr_exit_on_touch:
+                    line = signals[pos.ticker].at[day, "atr_stop"]
+                    frozen = pd.isna(line) and pd.notna(pos.frozen_line)
+                    if frozen:
+                        line = pos.frozen_line  # no green line yet: the one the buy day would have had
+                    if not rules.sticky_stop:
+                        pos.stop_line = line
+                    elif pd.notna(line):
+                        pos.stop_line = line if pd.isna(pos.stop_line) else max(pos.stop_line, line)
+                    stop, reason = pos.stop_line * (1 - rules.atr_stop_buffer), "no-line-stop" if frozen else "atr-stop"
                 low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
-                if pos.tp_taken or pd.isna(stop) or low is None or low > stop:
+                if pos.tp_taken or low is None:
+                    continue
+                atr_hit = pd.notna(stop) and low <= stop
+                loss_hit = False
+                if rules.stop_loss:
+                    loss_stop = pos.entry_price * (1 - rules.stop_loss)
+                    # Bought during the day: the low may have come before the purchase (as for the hard stop).
+                    loss_low = px(pos.ticker, day, "close") if pos.intraday_entry and pos.entry_date == day else low
+                    loss_hit = loss_low is not None and loss_low <= loss_stop
+                    if loss_hit and (not atr_hit or loss_stop > stop):
+                        stop, reason, atr_hit = loss_stop, "stop-loss", True
+                if not atr_hit:
                     continue
                 fill = min(stop, open_) if open_ is not None and day != pos.entry_date else stop
-                sell(pos, pos.shares, fill, day, "no-line-stop" if frozen else "atr-stop")
+                sell(pos, pos.shares, fill, day, reason)
                 close_out(pos, day)
 
         # 2a'. Red-line stop: while a position has no green line yet (the buy day closed back
@@ -519,6 +545,16 @@ def run(
                 if pos.shares == 0:
                     close_out(pos, day)
                     break
+
+        # 2b'. 50MA violation (rest_exit="violation"): after +8%, sell the rest the moment the price
+        #      trades below the low of the last close below the 50 SMA, at the open if it gaps below.
+        if rules.rest_exit == "violation":
+            for pos in list(positions.values()):
+                low, open_ = px(pos.ticker, day, "low"), px(pos.ticker, day, "open")
+                if not pos.tp_taken or pd.isna(pos.break_low) or low is None or low >= pos.break_low:
+                    continue
+                sell(pos, pos.shares, min(pos.break_low, open_) if open_ is not None else pos.break_low, day, "50ma-violation")
+                close_out(pos, day)
 
         # 2c. The parking ETF's open -> close return on whatever is still idle at the close
         #     (cash from intraday trades counts as idle for the whole day).
@@ -562,6 +598,15 @@ def run(
             else:
                 rest_line, closes_needed = sig.at[day, "ema20"], rules.ema_exit_days
             pos.closes_below_ema = pos.closes_below_ema + 1 if close < rest_line else 0
+            sma50 = sig.at[day, "sma50"]
+            if rules.rest_exit == "violation" and pos.tp_taken and pd.notna(sma50):
+                # A close below the 50 SMA marks a break day (several in a row: the highest low counts);
+                # a close back above it cancels.
+                if close < sma50:
+                    low = px(pos.ticker, day, "low")
+                    pos.break_low = low if pd.isna(pos.break_low) else max(pos.break_low, low)
+                elif close > sma50:
+                    pos.break_low = float("nan")
             if rules.frozen_line and pos.intraday_entry and pos.entry_date == day and sig.at[day, "trend"] != 1:
                 # Bought on the touch, but the day closed back below the flip line: no green line.
                 # Freeze the line the day would have had, had it closed above (until a real one shows).
@@ -587,7 +632,7 @@ def run(
                 elif ((rules.close_exit or not rules.atr_exit_on_touch) and pd.notna(pos.frozen_line)
                         and day != pos.entry_date and close < pos.frozen_line):
                     pending_exits[pos.ticker] = "no-line-exit"  # a close below the frozen line
-            elif (pos.armed and pos.closes_below_ema >= closes_needed
+            elif (rules.rest_exit != "violation" and pos.armed and pos.closes_below_ema >= closes_needed
                   and day_number - pos.entry_day >= rules.rest_exit_delay):
                 pending_exits[pos.ticker] = "exit"
             elif (rules.profit_floor and pos.best_close >= pos.entry_price * (1 + rules.profit_floor_after)

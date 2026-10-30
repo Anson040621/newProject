@@ -82,6 +82,7 @@ def test_default_rules_are_version_26():
     assert not rules.twin_days
     assert (rules.take_profit_fraction, rules.take_profit2) == (1 / 3, 0.0)
     assert not rules.market_dd and not rules.market_sma and not rules.template and rules.market_reentry
+    assert not rules.stop_loss
     assert (rules.climax_body, rules.climax_drop, rules.climax_drop_atr) == (0.06, 0.0, 0.0)
 
 
@@ -159,6 +160,42 @@ def test_second_partial_sale_and_nothing_sold_at_the_first_target():
     _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, take_profit_fraction=0.0, take_profit2=0.25))
     assert trades.iloc[0]["exits"] == f"{dates[4].date()} take-profit-2 38@126.00; {dates[5].date()} open at end 112@127.00"
     assert trades.iloc[0]["took_profit"]
+
+
+def test_stop_loss_before_the_take_profit_only():
+    closes = [100, 100, 100, 95.5, 95.5, 95.5]  # bought at 100 on day 2; day 3's low (94.55) touches -5%
+    dates, prices, sigs, top = make_world(closes, entry_day=1)
+    rules = basic_rules(cost=0.0, stop_loss=0.05)
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"] == f"{dates[3].date()} stop-loss 150@95.00"
+    prices["AAA"].loc[dates[3], ["open", "low"]] = [93.0, 92.0]  # a gap below: at the open
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"] == f"{dates[3].date()} stop-loss 150@93.00"
+    # With the ATR stop as well, the higher of the two sells.
+    prices["AAA"].loc[dates[3], ["open", "low"]] = [100.0, 94.0]
+    for line, expected in ((98.0, "atr-stop 150@98.00"), (90.0, "stop-loss 150@95.00")):
+        sigs["AAA"]["atr_stop"] = [np.nan, np.nan, np.nan, line, line, line]
+        _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, stop_loss=0.05, atr_exit_on_touch=True))
+        assert trades.iloc[0]["exits"] == f"{dates[3].date()} {expected}"
+    # After the take profit (+20%) the stop no longer applies.
+    dates, prices, sigs, top = make_world([100, 100, 100, 121, 94, 94], entry_day=1)
+    _, trades = strategy.run(dates, prices, sigs, top, basic_rules(cost=0.0, stop_loss=0.05, take_profit=0.20))
+    assert trades.iloc[0]["exits"] == f"{dates[3].date()} take-profit 50@121.00; {dates[5].date()} open at end 100@94.00"
+
+
+def test_50ma_violation_sells_the_rest_below_the_break_day_low():
+    #        signal  entry  +20%  break  break  above  break  below its low
+    closes = [100, 100, 100, 121, 108, 109, 111, 106, 104]
+    dates, prices, sigs, top = make_world(closes, entry_day=1)
+    sigs["AAA"]["sma50"] = 110.0
+    rules = basic_rules(cost=0.0, take_profit=0.20, rest_exit="violation")
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    # Day 4's low (106.92) and day 5's (107.91, the higher one) hold; day 6 closes back above the
+    # 50-day and cancels them; day 7 is a new break day (low 104.94); day 8 opens below it.
+    assert trades.iloc[0]["exits"] == f"{dates[3].date()} take-profit 50@121.00; {dates[8].date()} 50ma-violation 100@104.00"
+    prices["AAA"].loc[dates[8], ["open", "low"]] = [105.5, 104.5]  # no gap: sold at the break day's low
+    _, trades = strategy.run(dates, prices, sigs, top, rules)
+    assert trades.iloc[0]["exits"].endswith(f"{dates[8].date()} 50ma-violation 100@104.94")
 
 
 def test_ema_exit_waits_for_consecutive_closes_below():
@@ -548,6 +585,11 @@ def test_trend_template_needs_every_condition():
     assert not signals.trend_template(choppy * 1.01, choppy, heavy).iloc[-1]
     below = series(np.r_[[100.0] * 200, np.linspace(100, 60, 60), np.linspace(60, 80, 40)])  # 50-day under the 200-day
     assert not signals.trend_template(below * 1.01, below, below * 0 + 1e6).iloc[-1]
+    # full=False: only the 50-day above the 200-day and within 25% of the 52-week high.
+    assert signals.trend_template(dip * 1.01, dip, volume, full=False).iloc[-1]
+    assert signals.trend_template(choppy * 1.01, choppy, heavy, full=False).iloc[-1]
+    assert not signals.trend_template(spike, close, volume, full=False).iloc[-1]
+    assert not signals.trend_template(below * 1.01, below, below * 0 + 1e6, full=False).iloc[-1]
 
 
 def test_market_window_counts_distribution_days_and_the_average():

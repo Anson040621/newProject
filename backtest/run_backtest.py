@@ -70,8 +70,11 @@ def load_benchmark(start, symbol: str = "SPY") -> pd.Series:
     return load_etf(symbol)["close"].loc[start:]
 
 
-def prepare(start, end, top_n: int = 10, require_squeeze: bool = True, find_twins: bool = False, template: bool = False):
+def prepare(start, end, top_n: int = 10, require_squeeze: bool = True, find_twins: bool = False, template: str = ""):
     """Daily top N, the trading calendar, OHLC prices and signals for every ticker that ever made the top N.
+
+    template: "full" or "trend" adds the "template" signal column (signals.trend_template; "trend" =
+    only the 50-day above the 200-day and within 25% of the 52-week high).
 
     With find_twins, also the twin setups (backtest/twins.py) of every stock in the universe, with
     their prices and signals; that needs every stock's chart, so it takes a few minutes. Otherwise None.
@@ -94,7 +97,8 @@ def prepare(start, end, top_n: int = 10, require_squeeze: bool = True, find_twin
         full[ticker] = signals.ticker_signals(frame["high"], frame["low"], frame["close"], require_squeeze,
                                               open_=frame["open"])
         if template:
-            full[ticker]["template"] = signals.trend_template(frame["high"], frame["close"], frame["volume"])
+            full[ticker]["template"] = signals.trend_template(frame["high"], frame["close"], frame["volume"],
+                                                              full=template != "trend")
         sigs[ticker] = full[ticker].reindex(dates)
         prices[ticker] = frame.reindex(dates)
     for frame in sigs.values():
@@ -169,9 +173,10 @@ def main(argv=None):
     parser.add_argument("--failed-breakout-exit", action=argparse.BooleanOptionalAction,
                         default=defaults.failed_breakout_exit,
                         help="sell at the next open if the entry day closes back below the flip level (default off)")
-    parser.add_argument("--rest-exit", choices=["sma50", "ema20"], default=defaults.rest_exit,
+    parser.add_argument("--rest-exit", choices=["sma50", "ema20", "violation"], default=defaults.rest_exit,
                         help="after +8%%: sma50 = close more than --sma-exit-buffer below the 50 SMA (default); "
-                             "ema20 = --ema-exit-days closes in a row below the 20 EMA")
+                             "ema20 = --ema-exit-days closes in a row below the 20 EMA; violation = 50MA violation: "
+                             "the moment the price trades below the low of the last close below the 50 SMA")
     parser.add_argument("--frozen-line", action=argparse.BooleanOptionalAction, default=defaults.frozen_line,
                         help="no-line entries: use the green line the buy day would have had as a fixed stop "
                              "until the trend turns up (default off)")
@@ -191,6 +196,9 @@ def main(argv=None):
                              "--no-entry-on-touch buys at the next open after a close-based flip")
     parser.add_argument("--emergency-stop", type=float, default=defaults.emergency_stop,
                         help="hard stop: sell everything at this loss from entry, e.g. 0.12 = -12%% (default; 0 = off)")
+    parser.add_argument("--stop-loss", type=float, default=defaults.stop_loss,
+                        help="before --take-profit: sell everything the moment the price touches this loss from the "
+                             "entry, e.g. 0.05 = -5%% (default 0 = off)")
     parser.add_argument("--reentry-days", type=int, default=defaults.reentry_days,
                         help="re-buy if the ATR flips back to BUY within N days of an early exit (default 5, 0 = off)")
     parser.add_argument("--entry-check", choices=["prev", "live", "either"], default=defaults.entry_check,
@@ -271,10 +279,11 @@ def main(argv=None):
                         help="no new buys after an S&P 500 close below its N-day average, e.g. 20 (default 0 = off)")
     parser.add_argument("--market-reentry", action=argparse.BooleanOptionalAction, default=defaults.market_reentry,
                         help="the market filters stop re-entries too (default); --no-market-reentry: new setup buys only")
-    parser.add_argument("--template", action=argparse.BooleanOptionalAction, default=defaults.template,
+    parser.add_argument("--template", nargs="?", const="full", choices=["full", "trend"], default=None,
                         help="only buy setups in stocks that meet the uptrend template that evening: above the 50-day "
                              "SMA, 50-day above the 200-day, more volume on up days than down days over 20 sessions, "
-                             "within 25%% of the 52-week high (default off)")
+                             "within 25%% of the 52-week high (default off); --template trend: only the 50-day above "
+                             "the 200-day and within 25%% of the 52-week high")
     parser.add_argument("--template-reentry", action=argparse.BooleanOptionalAction, default=defaults.template_reentry,
                         help="with --template: re-entries must meet it too (default off)")
     parser.add_argument("--red-line-stop", type=float, default=defaults.red_line_stop,
@@ -295,14 +304,14 @@ def main(argv=None):
         take_profit=args.take_profit, take_profit_fraction=args.take_profit_fraction, take_profit2=args.take_profit2,
         take_profit2_fraction=args.take_profit2_fraction, cost=args.cost, capital=args.capital, ema_exit_days=args.ema_exit_days,
         atr_exit_on_touch=args.atr_exit_on_touch, entry_on_touch=args.entry_on_touch,
-        emergency_stop=args.emergency_stop, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
+        emergency_stop=args.emergency_stop, stop_loss=args.stop_loss, reentry_days=args.reentry_days, reentry_top=args.reentry_top,
         extra_slots=args.extra_slots, min_vol=args.min_vol, max_vol=args.max_vol, reentry_after_tp=args.reentry_after_tp,
         red_line_stop=args.red_line_stop, climax_gain=args.climax_gain, climax_stretch=args.climax_stretch,
         climax_days=args.climax_days, climax_ma=args.climax_ma, climax_gap=args.climax_gap, market_ma=args.market_ma,
         climax_drop=args.climax_drop, climax_body=args.climax_body, climax_drop_atr=args.climax_drop_atr,
         climax_reentry=args.climax_reentry, reentry_max_losses=args.reentry_max_losses, reentry_win=args.reentry_win,
         market_dd=args.market_dd, market_dd_days=args.market_dd_days, market_sma=args.market_sma,
-        market_reentry=args.market_reentry, template=args.template, template_reentry=args.template_reentry,
+        market_reentry=args.market_reentry, template=bool(args.template), template_reentry=args.template_reentry,
         profit_floor=args.profit_floor, profit_floor_after=args.profit_floor_after, list_memory=args.list_memory,
         late_entry_days=args.late_entry_days, twin_days=args.twin_days,
         list_memory_min_sctr=args.list_memory_min_sctr, list_memory_min_run=args.list_memory_min_run,
@@ -313,7 +322,7 @@ def main(argv=None):
     )
     ranks = 10**4 if args.extra_slots or args.list_memory_min_sctr else max(args.top, args.reentry_top)
     dates, prices, sigs, top, twin_setups = prepare(args.start, args.end, ranks, not args.no_squeeze, bool(args.twin_days),
-                                                    args.template)
+                                                    args.template or "")
     park = load_etf(args.park).reindex(dates).ffill() if args.park else None
     market = None
     if args.market_ma or args.market_dd or args.market_sma:

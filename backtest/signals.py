@@ -172,16 +172,20 @@ def ema(close: pd.Series, length: int = EMA_LENGTH) -> pd.Series:
 
 
 def trend_template(high: pd.Series, close: pd.Series, volume: pd.Series, volume_days: int = 20,
-                   near_high: float = 0.25) -> pd.Series:
+                   near_high: float = 0.25, full: bool = True) -> pd.Series:
     """The uptrend template at each close (Rules.template): the close is above the 50-day SMA, the
     50-day SMA is above the 200-day SMA, the last `volume_days` sessions traded more volume on up
-    days than on down days, and the close is within 25% of the highest high of the last 252 sessions."""
+    days than on down days, and the close is within 25% of the highest high of the last 252 sessions.
+    With full=False only the 50-day above the 200-day and the 52-week high are checked."""
     sma50, sma200 = close.rolling(50).mean(), close.rolling(200).mean()
+    high_52w = high.rolling(252, min_periods=200).max()
+    ok = (sma50 > sma200) & (close >= high_52w * (1 - near_high))
+    if not full:
+        return ok
     change = close.diff()
     up = volume.where(change > 0, 0.0).rolling(volume_days).sum()
     down = volume.where(change < 0, 0.0).rolling(volume_days).sum()
-    high_52w = high.rolling(252, min_periods=200).max()
-    return (close > sma50) & (sma50 > sma200) & (up > down) & (close >= high_52w * (1 - near_high))
+    return ok & (close > sma50) & (up > down)
 
 
 def ticker_signals(high: pd.Series, low: pd.Series, close: pd.Series, require_squeeze: bool = True,
